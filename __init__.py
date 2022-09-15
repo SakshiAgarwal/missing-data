@@ -5,3 +5,6 @@ from loss import *
 from train import *
 from plot import *
 from networks import simple_encoder, simple_decoder
+from inference import *
+from mixture import *
+from gmms import *
