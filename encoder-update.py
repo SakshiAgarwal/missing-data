@@ -1,13 +1,13 @@
 import os
 from numba import cuda
-cuda.select_device(3)
+cuda.select_device(0)
 print(cuda.current_context().get_memory_info())
 #os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 #os.environ["NVIDIA_VISIBLE_DEVICES"] = "2"
-os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
 import torch
-torch.cuda.set_device(3)
+torch.cuda.set_device(0)
 print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -49,15 +49,18 @@ ENCODER_PATH = "models/e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
 DECODER_PATH = "models/d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
 
 ##Patches of missing data in train & valid data
-train_loader, val_loader = train_valid_loader(data_dir ="data" , batch_size=batch_size, valid_size = valid_size, binary_data = binary_data, ispatches=True)
+#train_loader, val_loader = train_valid_loader(data_dir ="data" , batch_size=batch_size, valid_size = valid_size, binary_data = binary_data, ispatches=True)
 
-test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=64)
+##Top-half missing
+train_loader, val_loader = train_valid_loader(data_dir ="data" , batch_size=batch_size, valid_size = valid_size, binary_data = binary_data, top_half=True)
+
+
+#test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=64)
 
 channels = 1    #1 for MNist
 p = 28          # 28 for mnist
 q = 28
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 encoder =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
 decoder = FlatWideResNetUpscaling(channels=channels, size=1, levels=3, blocks_per_level=2, in_features = d, shape=(p,q))
@@ -74,15 +77,15 @@ print("model loaded")
 
 optimizer = torch.optim.Adam(list(encoder.parameters()), lr=learning_rate)
 
-ENCODER_PATH = "models/e_model_"+ str(binary_data) + "updated_test.pt" 
+ENCODER_PATH = "models/e_model_"+ str(binary_data) + "top_half-updated.pt" 
 
 p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
 
 ## Only the encoder is updated
 
 if num_epochs>0:
-	#encoder, decoder = train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
-	encoder, decoder = train_VAE(num_epochs, test_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
+	encoder, decoder = train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
+	#encoder, decoder = train_VAE(num_epochs, test_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
 
 
 

@@ -193,7 +193,7 @@ class BinaryMNIST_Test(Dataset):
 	    return len(self.images)
 
 class BinaryMNIST(Dataset):
-	def __init__(self,dataset, patches=False, return_labels=False):
+	def __init__(self,dataset, patches=False, top_half = False,return_labels=False):
 		self.images  = dataset.data
 		self.labels = dataset.targets
 		self.n=self.images.size()[0]
@@ -229,6 +229,15 @@ class BinaryMNIST(Dataset):
 			mask = np.isfinite(xmiss).astype(np.bool)  # False indicates missing, True indicates observed
 			xhat_0 = np.copy(self.images).astype(np.float)
 			xhat_0[~mask] = 0
+		elif top_half:
+			mask = np.zeros((28,28))
+			mask[14:,:] = 1
+			##Right half missing : mask[:,:14] = 1
+			##Bottom half missing : mask[:14,:] = 1
+			mask = mask.astype(np.bool)
+			mask = np.tile(mask, (self.n,1,1)).reshape([self.n,1,28,28])
+			xhat_0 = np.copy(self.images).astype(np.float)
+			xhat_0[~mask] = 0
 		else:
 			xhat_0 = np.copy(self.images).astype(np.float)
 
@@ -251,7 +260,7 @@ class BinaryMNIST(Dataset):
 	def __len__(self):	
 		return len(self.images)
 
-def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = False, return_labels=False, ispatches=False):
+def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = False, return_labels=False, ispatches=False, top_half=False):
 	#normalize = transforms.Normalize((0.5), (0.5))
 
 	train_dataset = datasets.MNIST(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
@@ -281,8 +290,8 @@ def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = Fa
 	train_sampler = SubsetRandomSampler(train_idx)
 	valid_sampler = SubsetRandomSampler(valid_idx)
 
-	train_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(train_dataset, patches=ispatches, return_labels = return_labels),batch_size=batch_size, sampler=train_sampler)
-	valid_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(valid_dataset, patches =ispatches, return_labels = return_labels),batch_size=1, sampler=valid_sampler)
+	train_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(train_dataset, patches=ispatches, top_half=top_half, return_labels = return_labels),batch_size=batch_size, sampler=train_sampler)
+	valid_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(valid_dataset, patches =ispatches, top_half=top_half, return_labels = return_labels),batch_size=1, sampler=valid_sampler)
 	return train_loader, valid_loader
 
 def get_sample_digit(data_dir, digit, file):

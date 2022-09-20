@@ -56,7 +56,6 @@ def train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH,  results, enco
 		train_log_likelihood = train_log_likelihood/nb 
 		print('Epoch {}: Training : Loss {}, log-likelihood {}'.format(epoch, train_loss, train_log_likelihood))
 
-
 		#with open(results + ".txt", 'a') as f:
 	    #f.write(str(-train_loss.cpu().data.numpy().astype(np.float)) + " \t " + str(train_log_likelihood.cpu().data.numpy().astype(np.float)) + "\t")
 		#f.write("Train-loglikelihood/pixel " + str((train_log_likelihood/(batch_size*28*28))) + " \t Train-log-likelihood/batch" + str(train_log_likelihood) + "\t")

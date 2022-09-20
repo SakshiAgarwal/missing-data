@@ -1,13 +1,14 @@
+cuda_n = 3
 import os
 from numba import cuda
-cuda.select_device(3)
+cuda.select_device(cuda_n)
 print(cuda.current_context().get_memory_info())
 #os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 #os.environ["NVIDIA_VISIBLE_DEVICES"] = "2"
-os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
+os.environ['CUDA_LAUNCH_BLOCKING'] = str(cuda_n)
 import torch
-torch.cuda.set_device(3)
+torch.cuda.set_device(cuda_n)
 print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -52,6 +53,7 @@ num_epochs_test = 300
 ##results for beta-annealing
 #results=os.getcwd() + "/results/mnist-" + str(binary_data) + "-beta-annealing-"
 ##Results for alpha-annealing
+
 results=os.getcwd() + "/results/mnist-" + str(binary_data) + "-"
 ENCODER_PATH = "models/e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
 DECODER_PATH = "models/d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
@@ -197,10 +199,10 @@ for K_samples in K_samples_ :
             #print(torch.cuda.memory_allocated(device=0))
             ## MAR (0.5, 0.8)
             #test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, perc_miss = i),batch_size=1)
-            ## Right half missing (0)
-            #test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, top_half=True),batch_size=1)
+            ## Top half missing (0)
+            test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, top_half=True),batch_size=1)
             ## 4 patches of size 10*10 missing (-1)
-            test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=1)
+            #test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=1)
             
             #print("test data loaded")
             test_log_likelihood, test_loss, test_mse, nb, = 0, 0, 0, 0
@@ -255,12 +257,12 @@ for K_samples in K_samples_ :
                 random = False
 
                 img = b_full.cpu().data.numpy()         ## added .data
-                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
+                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
 
                 missing = b_data
                 missing[~b_mask] = 0.5      
                 img = missing.cpu().data.numpy() 
-                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
+                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
 
                 #lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
                 #upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
@@ -309,7 +311,7 @@ for K_samples in K_samples_ :
                     else:
                         burn_in_image = b_data.to(device,dtype = torch.float)
                         burn_in_image[~b_mask] = torch.sigmoid(x_logits_init)[~b_mask].to(device,dtype = torch.float)
-                        plot_image(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-' + "burn-in.png" )
+                        #plot_image(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-' + "burn-in.png" )
 
                 dd = False
 
@@ -332,7 +334,7 @@ for K_samples in K_samples_ :
                 #Impute image with pseudo-gibbs
                 pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
                 pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
-                plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
+                #plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
 
                 ##M-with-gibbs sampler
                 start_m = datetime.now()
@@ -351,7 +353,7 @@ for K_samples in K_samples_ :
                 #Impute image with metropolis-within-pseudo-gibbs
                 metropolis_image = b_data.to(device,dtype = torch.float)
                 metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
-                plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
+                #plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
 
                 if dd:
                     if iterations==-1:
@@ -459,14 +461,6 @@ for K_samples in K_samples_ :
                 mixture_iwae +=iwae
                 mixture_loss += z_nelbo_
 
-                start_mix = datetime.now()
-                xm_nelbo_, xm_error_, iwae, t1, t2, means, scales = optimize_IAF_gaussian(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, p_z_eval = p_z_eval  )
-                end_mix = datetime.now()
-                diff_mix = end_mix - start_mix
-                print("Time taken for optimizing mixtures : ", diff_mix.total_seconds())
-                iaf_gaussian_params.append([t1.state_dict(), t2.state_dict()])
-                
-
                 #mixture_loss_samples[nb%10, iterations, samples_iter] = z_nelbo_[-1]
 
                 prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
@@ -478,16 +472,16 @@ for K_samples in K_samples_ :
                 nb += 1
                 print(lower_bound/nb, upper_bound/nb, bound_updated_encoder/nb, pseudo_iwae/nb, m_iwae/nb,  xm_iwae/nb,  xm_NN_iwae/nb,  iaf_iwae/nb, z_iwae/nb, mixture_iwae/nb, mixture_iwae_inits/nb) #added mixture_iwae_inits later
 
-                file_save_params = results + str(-1) + "/pickled_files/params_mnist_.pkl"
+                file_save_params = results + str(-1) + "/pickled_files/TH-params_mnist.pkl"
 
                 with open(file_save_params, 'wb') as file:
                     pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
 
-                file_loss = results + str(-1) + "/pickled_files/loss_.pkl"
+                file_loss = results + str(-1) + "/pickled_files/TH-loss.pkl"
                 with open(file_loss, 'wb') as file:
                     pickle.dump([xm_loss,xm_loss_NN,z_loss,iaf_loss,mixture_loss_inits,mixture_loss,nb], file)
 
-                compare_ELBO(num_epochs_test, xm_loss/num_images_to_run, iaf_loss/num_images_to_run, z_loss/num_images_to_run, mixture_loss_inits/num_images_to_run, mixture_loss/num_images_to_run , results, -1, image = 0) #ylim1= value - 50,ylim2 = value + 20,
+                #compare_ELBO(num_epochs_test, xm_loss/num_images_to_run, iaf_loss/num_images_to_run, z_loss/num_images_to_run, mixture_loss_inits/num_images_to_run, mixture_loss/num_images_to_run , results, -1, image = 0) #ylim1= value - 50,ylim2 = value + 20,
 
 
 #plot_loss_vs_sample_size(mixture_loss_samples, K_samples_, results + str(i) + "/compiled/" )

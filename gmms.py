@@ -22,7 +22,7 @@ def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_s
 	print(batch_size)
 	for data in train_loader:
 		b_data, b_mask, b_full, labels_one_hot  = data
-		labels = torch.argmax(labels_one_hot, dim=1).item()
+		#labels = torch.argmax(labels_one_hot, dim=1).item()
 		b_full = b_full.to(device,dtype = torch.float)
 
 		out_encoder = encoder.forward(b_full)

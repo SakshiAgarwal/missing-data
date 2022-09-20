@@ -55,7 +55,6 @@ num_epochs_test = 500
 results = os.getcwd() + "/results/mnist-" + str(binary_data) + "-"
 ENCODER_PATH = "models/e_model_"+ str(binary_data) + "classification.pt"  ##without 20 is d=50
 DECODER_PATH = "models/d_model_"+ str(binary_data) + "classification.pt"  ##simple is for simple VAE
-
 DISCRIMINATIVE_PATH = "models/e_model_"+ str(binary_data) + "ygivenx.pt"
 
 """
@@ -74,7 +73,6 @@ channels = 1 + 10   #1 for MNist
 p = 28          # 28 for mnist
 q = 28
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#print(device)
 
 encoder =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
 decoder = FlatWideResNetUpscaling(channels=1, size=1, levels=3, blocks_per_level=2, in_features = 10 + d, shape=(p,q))
@@ -93,7 +91,7 @@ Training the network for a given number of epochs
 The loss after every epoch is printed
 """
 
-p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+#p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
 
 best_loss, count = 0, 0
 
@@ -113,17 +111,17 @@ print(torch.cuda.current_device())
 print("model loaded")
 
 ##Re-train again, for now we do only the gaussian case
-file_save = results + str(-1) + "/classification-gmms-per-class.pkl"
+file_save = results + str(-1) + "/classification-gmms.pkl"
 
 if os.path.exists(file_save):
     with open(file_save, 'rb') as file:
-        means,std,weights = pickle.load(file)
+        gm = pickle.load(file)
 else:
     train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, with_labels=True)
 
-means_ = torch.from_numpy(means)
-std_ = torch.from_numpy(std)
-weights_ = torch.from_numpy(weights)
+#means_ = torch.from_numpy(means)
+#std_ = torch.from_numpy(std)
+#weights_ = torch.from_numpy(weights)
 
 for params in encoder.parameters():
     params.requires_grad = False
@@ -179,12 +177,21 @@ mixture_loss_samples = np.zeros((2,6,len(K_samples_)))
 
 samples_iter = -1
 
+p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+p_y = td.Categorical(logits=torch.zeros(10).cuda())
+
+means_ = torch.from_numpy(gm.means_)
+std_ = torch.sqrt(torch.from_numpy(gm.covariances_))
+weights_ = torch.from_numpy(gm.weights_)
+#p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
+
+
 for K_samples in K_samples_ :
     samples_iter += 1
     for iterations in range(1):
         for i in [-1]:
-            p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
-            p_y = td.Categorical(logits=torch.zeros(10).cuda())
+            #p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+            
             ### Get test loader for different missing percentage value
             #print("memory before --" )
             #print(torch.cuda.memory_allocated(device=0))
@@ -223,11 +230,10 @@ for K_samples in K_samples_ :
                 nb += 1
                 if nb<20:
                     continue
-                if nb==21:
+                if nb==22:
                     break
                 
                 #print("Image : ", nb)
-
                 ##b_data here doesn't have label concatenated but b_full does
                 b_data, b_mask, b_full, labels = data
                 b_data_init = b_data
@@ -238,6 +244,10 @@ for K_samples in K_samples_ :
                 burn_in_ = True
                 random = False
 
+                #out = discriminative_model.forward(b_data.to(device,dtype = torch.float))
+                #print(torch.nn.functional.softmax(out, dim=1))
+                #exit()
+
                 img = b_full[:,0,:,:].cpu().data.numpy().reshape([1,1,28,28])         ## added .data
                 plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
 
@@ -246,87 +256,91 @@ for K_samples in K_samples_ :
                 img = missing.cpu().data.numpy() 
                 plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
 
-                #lower_bound =  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, with_labels = True)
+                b_data_sampling = b_full
+                b_data_sampling[0,0,:,:].reshape([1,1,28,28])[~b_mask] = 0
+                ##No information in labels
+                for i_ in range(10):
+                    b_data_sampling[0,i_+1,:,:] = 0
+
                 upper_bound =  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, with_labels = True, labels = labels.to(device,dtype = torch.float))
+                lower_bound =  eval_iwae_bound(iota_x = b_data_sampling.to(device,dtype = torch.float), full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, with_labels = True, labels = labels.to(device,dtype = torch.float))
+
                 #bound_updated_encoder = eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder_updated,decoder = decoder, p_z= p_z, d=d, K=K_samples)
                 #print("Lower IWAE bound (0's) : ", lower_bound)
                 print("Upper IWAE bound (true image) : ", upper_bound)
-                #print("Bound with re-tuned encoder onn training dataset : ", bound_updated_encoder)
+                #print("Bound with re-tuned encoder onn training dataset : ", bound_updated_encoder)      
 
-                dd = False
+                if random: 
+                    x_logits_init = torch.zeros_like(b_data)
+                    p_x_m = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_init[~b_mask]),1)
+                    b_data_init = b_data
+                    b_data_init[~b_mask] = p_x_m.sample()
+                    x_logits_init[~b_mask] = torch.log(b_data_init/(1-b_data_init))[~b_mask]
+                elif burn_in_:
+                    x_logits_init, b_data_init, z_init = burn_in(b_data_sampling.to(device,dtype = torch.float), b_mask, labels.to(device,dtype = torch.float),  encoder, decoder, p_z, d, burn_in_period=burn_in_period, with_labels=True)
+                    x_logits_init = x_logits_init.cpu()
+                    b_data_init = b_data_init.cpu()
+                    #b_data_init = b_data
+                    #b_data_init[~b_mask] = k_neighbors_sample(b_data, b_mask) 
+                    #b_data_init = b_data_init
+                    #x_logits_init = torch.log(b_data_init/(1-b_data_init))
 
-                if dd:
-                    if random: 
-                        x_logits_init = torch.zeros_like(b_data)
-                        p_x_m = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_init[~b_mask]),1)
-                        b_data_init = b_data
-                        b_data_init[~b_mask] = p_x_m.sample()
-                        x_logits_init[~b_mask] = torch.log(b_data_init/(1-b_data_init))[~b_mask]
-                    elif burn_in_:
-                        x_logits_init, b_data_init, z_init = burn_in(b_data.to(device,dtype = torch.float), b_mask, labels.to(device,dtype = torch.float),  encoder, decoder, p_z, d, burn_in_period=burn_in_period, with_labels=True)
-                        x_logits_init = x_logits_init.cpu()
-                        b_data_init = b_data_init.cpu()
-                        #b_data_init = b_data
-                        #b_data_init[~b_mask] = k_neighbors_sample(b_data, b_mask) 
-                        #b_data_init = b_data_init
-                        #x_logits_init = torch.log(b_data_init/(1-b_data_init))
+                sampled_image = b_data_init
+                sampled_image_m = sampled_image
+                sampled_image_o = sampled_image
 
-                    sampled_image = b_data_init
+                if iterations==-1:
+                    sampled_image[~b_mask] = b_full[~b_mask]    
+                    sampled_image_m[~b_mask] = b_full[~b_mask]   
+                    z_init =  encoder.forward(b_full.to(device,dtype = torch.float))
+                    sampled_image_o = sampled_image_m
+                else:
+                    #sampled_image = b_data_init
                     sampled_image_m = sampled_image
                     sampled_image_o = sampled_image
 
-                
-                    if iterations==0:
-                        sampled_image[~b_mask] = b_full[~b_mask]    
-                        sampled_image_m[~b_mask] = b_full[~b_mask]   
-                        z_init =  encoder.forward(b_full.to(device,dtype = torch.float))
-                        sampled_image_o = sampled_image_m
+                if not burn_in:
+                    plot_image(np.squeeze(sampled_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + "init.png" )
+                else:
+                    if iterations==-1:
+                        plot_image(np.squeeze(sampled_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-'  + "burn-in.png" )
                     else:
-                        #sampled_image = b_data_init
-                        sampled_image_m = sampled_image
-                        sampled_image_o = sampled_image
+                        burn_in_image = b_data.to(device,dtype = torch.float)
+                        burn_in_image[~b_mask] = torch.sigmoid(x_logits_init)[~b_mask].to(device,dtype = torch.float)
+                        plot_image(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-' + "burn-in.png" )
 
-                    if not burn_in:
-                        plot_image(np.squeeze(sampled_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + "init.png" )
-                    else:
-                        if iterations==0:
-                            plot_image(np.squeeze(sampled_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-'  + "burn-in.png" )
-                        else:
-                            burn_in_image = b_data.to(device,dtype = torch.float)
-                            burn_in_image[~b_mask] = torch.sigmoid(x_logits_init)[~b_mask].to(device,dtype = torch.float)
-                            plot_image(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-' + "burn-in.png" )
-                 
+                #b_data_sampling[0,0] = sampled_image
+
+                start_pg = datetime.now()
+                x_logits_pseudo_gibbs, __ , iwae, sample = pseudo_gibbs(sampled_image.to(device,dtype = torch.float), b_data_sampling.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, results, iterations, T=num_epochs_test, nb=nb, K = 1, with_labels=True, labels = labels, full = b_full[0,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float))
+                end_pg = datetime.now()
+                diff_z = end_pg - start_pg
+                print(" Time taken for pseudo-gibbs", diff_z.total_seconds())
+
+                #Impute image with pseudo-gibbs
+                pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
+                pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
+                plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
+
+                ##M-with-gibbs sampler
+                start_m = datetime.now()
+                m_nelbo, m_error, x_full_logits, m_loglike, iwae, x_prev =  m_g_sampler(iota_x = sampled_image_m.to(device,dtype = torch.float), full = b_full[0,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float) , mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, results = results, nb = nb, iterations = iterations, K= 1, T=num_epochs_test, with_labels=True, labels = labels)
+                end_m = datetime.now()
+                diff_z = end_m - start_m
+                print(" Time taken for metropolis within gibbs", diff_z.total_seconds())
+            
+                m_loss += np.array(m_nelbo).reshape((num_epochs_test))
+                m_loglikelihood += np.array(m_loglike).reshape((num_epochs_test))
+                m_elbo -= np.array(m_nelbo).reshape((num_epochs_test))
+                m_mse += np.array(m_error).reshape((num_epochs_test))
+
+                #Impute image with metropolis-within-pseudo-gibbs
+                metropolis_image = b_data.to(device,dtype = torch.float)
+                metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
+                plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
+
                 dd = False
-
                 if dd:
-                    start_pg = datetime.now()
-                    x_logits_pseudo_gibbs, x_sample_pseudo_gibbs = pseudo_gibbs(sampled_image.to(device,dtype = torch.float), b_data.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, results, iterations, T=num_epochs_test, nb=nb, K = 1)
-                    end_pg = datetime.now()
-                    diff_z = end_pg - start_pg
-                    print(" Time taken for pseudo-gibbs", diff_z.total_seconds())
-
-                    #Impute image with pseudo-gibbs
-                    pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
-                    pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
-                    plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
-
-                    ##M-with-gibbs sampler
-                    start_m = datetime.now()
-                    m_nelbo, m_error, x_full_logits, m_loglike =  m_g_sampler(iota_x = sampled_image_m.to(device,dtype = torch.float), full = b_full.to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, results = results, nb = nb, iterations = iterations, K= 1, T=num_epochs_test)
-                    end_m = datetime.now()
-                    diff_z = end_m - start_m
-                    print(" Time taken for metropolis within gibbs", diff_z.total_seconds())
-                
-                    m_loss += np.array(m_nelbo).reshape((num_epochs_test))
-                    m_loglikelihood += np.array(m_loglike).reshape((num_epochs_test))
-                    m_elbo -= np.array(m_nelbo).reshape((num_epochs_test))
-                    m_mse += np.array(m_error).reshape((num_epochs_test))
-
-                    #Impute image with metropolis-within-pseudo-gibbs
-                    metropolis_image = b_data.to(device,dtype = torch.float)
-                    metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
-                    plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
-
                     if iterations==-1:
                         xm_params = torch.log(b_full/(1-b_full))[~b_mask]
                     else:
@@ -368,28 +382,16 @@ for K_samples in K_samples_ :
                     xm_loss_NN[iterations, nb%10, : ] = xm_nelbo_
                     xm_mse_NN[iterations, nb%10, : ] = xm_error_
 
-                    b_data[~b_mask] = 0
-                    if iterations==-1:
-                        z_init =  encoder.forward(b_full.to(device,dtype = torch.float))
-                    else:
-                        z_init =  encoder.forward(b_data.to(device,dtype = torch.float))
+                b_data[~b_mask] = 0
+                start_iaf = datetime.now()
+                xm_nelbo_, xm_error_ = optimize_IAF_with_labels(num_epochs = num_epochs_test, p_z = p_z, p_y = p_y, b_data = b_data.to(device,dtype = torch.float), b_full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),  encoder = encoder, decoder = decoder, discriminative_model = discriminative_model, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples)
 
-                    start_iaf = datetime.now()
-                    xm_nelbo_, xm_error_ = optimize_IAF(num_epochs = num_epochs_test, xm_params = xm_params, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples )
-                    end_iaf = datetime.now()
-                    diff_iaf = end_iaf - start_iaf
-                    print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())
+                end_iaf = datetime.now()
+                diff_iaf = end_iaf - start_iaf
+                print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())
 
-                    iaf_loss[iterations, nb%10, : ] = xm_nelbo_
-                    iaf_mse[iterations, nb%10, : ] = xm_error_
-
-                    b_data[~b_mask] = 0
-
-                    if iterations==-1:
-                        z_init =  encoder.forward(b_full.to(device,dtype = torch.float))
-                    else:
-                        z_init =  encoder.forward(b_data.to(device,dtype = torch.float))
-
+                iaf_loss[iterations, nb%10, : ] = xm_nelbo_
+                iaf_mse[iterations, nb%10, : ] = xm_error_
                 ##From here
                 b_data[~b_mask] = 0
                 start_z = datetime.now()
@@ -404,18 +406,20 @@ for K_samples in K_samples_ :
                 prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
 
                 #print(means, std, weights)
-                means_ = torch.from_numpy(means)
-                std_ = torch.from_numpy(std)
-                weights_ = torch.from_numpy(weights)
-
                 b_data[~b_mask] = 0
-                #p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
                 start_mix = datetime.now()
-                z_nelbo_, z_error_ = optimize_mixture_labels(num_epochs = num_epochs_test, means_pz= means_, std_pz = std_, weights_pz = weights_, p_y = p_y,  b_data = b_data.to(device,dtype = torch.float), b_full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, discriminative_model = discriminative_model, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples,  labels = labels.to(device,dtype = torch.float))
+                z_nelbo_, z_error_ = optimize_mixture_labels(num_epochs = num_epochs_test, p_z = p_z, p_y = p_y,  b_data = b_data.to(device,dtype = torch.float), b_full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, discriminative_model = discriminative_model, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples,  labels = labels.to(device,dtype = torch.float), do_random=True)
                 end_mix = datetime.now()
                 diff_mix = end_mix - start_mix
                 print("Time taken for optimizing mixtures : ", diff_mix.total_seconds())
 
+                ##WITHOUT re-inits
+                b_data[~b_mask] = 0
+                start_mix = datetime.now()
+                z_nelbo_, z_error_ = optimize_mixture_labels(num_epochs = num_epochs_test, p_z = p_z, p_y = p_y,  b_data = b_data.to(device,dtype = torch.float), b_full = b_full[:,0,:,:].reshape([1,1,28,28]).to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, discriminative_model = discriminative_model, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples,  labels = labels.to(device,dtype = torch.float), do_random=False)
+                end_mix = datetime.now()
+                diff_mix = end_mix - start_mix
+                print("Time taken for optimizing mixtures : ", diff_mix.total_seconds())
 
                 mixture_loss[iterations, nb%10, : ] = z_nelbo_
                 mixture_mse[iterations, nb%10, : ] = z_error_

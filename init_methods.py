@@ -21,8 +21,8 @@ def burn_in(b_data, b_mask, labels, encoder, decoder, p_z, d, burn_in_period=20,
 		z_init =  mvae_impute(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, with_labels=with_labels, labels= labels)[1]
 		for l in range(burn_in_period):
 			x_logits, z_init = mvae_impute(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, with_labels=with_labels, labels= labels)
-			x_logits = x_logits.reshape(1,channels,p,q)
-			b_data [~b_mask] = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits),1).sample()[~b_mask]
+			x_logits = x_logits.reshape(1,1,p,q)
+			b_data[0,0,:,:].reshape([1,1,28,28])[~b_mask] = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits),1).sample()[~b_mask]
 	else: 
 		z_init =  mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1)[1]
 		for l in range(burn_in_period):
@@ -520,7 +520,7 @@ def init_params_mixture_labels(encoder, decoder, discriminative_model, b_data, b
 	#Initialize parameters of q(z|y)
 
 	b_data_ = torch.Tensor.repeat(b_data,[num_components,1,1,1])  
-	print(b_data_.shape)
+	#print(b_data_.shape)
 	b_mask_ = torch.Tensor.repeat(b_mask,[num_components,1,1,1])
 	x_logits_init = torch.zeros_like(b_data[:,0,:,:].reshape(1,1,28,28))
 
@@ -539,9 +539,9 @@ def init_params_mixture_labels(encoder, decoder, discriminative_model, b_data, b
 		else:
 			p_xm = td.Normal(loc = x_logits_init[~b_mask].reshape([-1,1]), scale =  torch.ones_like(b_data)[~b_mask].reshape([-1,1])) #.to(device,dtype = torch.float)
 
-		print(b_data_.shape, b_mask_.shape)
+		#print(b_data_.shape, b_mask_.shape)
 		b_data_[~b_mask_] = p_xm.sample([num_components]).reshape(-1)  
-		print(labels.shape, b_data_.shape)
+		#print(labels.shape, b_data_.shape)
 		b_data_n = torch.cat((b_data_, labels.to(device,dtype = torch.float)), axis=1)
 		#b_data_ = torch.Tensor.repeat(b_data_,[num_components,1,1,1])  
 		out_encoder = encoder.forward(b_data_n)
@@ -559,7 +559,8 @@ def init_params_labels(encoder, decoder, discriminative_model, p_z, b_data, b_ma
 	logits = torch.zeros(1,10) 
 	means = torch.zeros(10, d)
 	scales = torch.zeros(10, d)
-	#Initialize parameters of q(z|y)	
+	#Initialize parameters of q(z|y)
+
 	for i in range(10):
 		labels = torch.zeros(1, 10)
 		labels[0,i] = 1.0
@@ -567,7 +568,7 @@ def init_params_labels(encoder, decoder, discriminative_model, p_z, b_data, b_ma
 
 		labels = torch.repeat_interleave(labels, 28, dim=2)
 		labels = torch.repeat_interleave(labels, 28, dim=3)
-		print(labels.shape)
+		#print(labels.shape)
 		b_data_ = torch.cat((b_data, labels.to(device,dtype = torch.float)), axis=1)
 		out_encoder = encoder.forward(b_data_)
 
@@ -576,6 +577,7 @@ def init_params_labels(encoder, decoder, discriminative_model, p_z, b_data, b_ma
 
 	return logits, means, scales
 
+##Not the updated function.
 def init_mixture_labels(encoder, decoder, discriminative_model, p_z, b_data, b_mask, num_components, batch_size, d, r1, r2, data='mnist'):
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

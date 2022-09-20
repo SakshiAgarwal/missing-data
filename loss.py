@@ -9,6 +9,8 @@ from mixture import *
 from gaussian import *
 import os
 import pickle
+from plot import *
+import matplotlib.pyplot as plt
 
 
 def mean(x):
@@ -30,6 +32,38 @@ def entropy(x,device):
         return 1 -  x/(1-torch.exp(-x)) -torch.log(x/(torch.exp(x)-1)) 
     else :
         return torch.tensor(0).to(device,dtype = torch.float)
+
+def plot_image(img, file='true.png', missing_pattern_x = None, missing_pattern_y = None):
+    plt.imshow(img, cmap='gray', vmin=0, vmax=1)
+    if missing_pattern_x is not None: 
+        plt.scatter(missing_pattern_y, missing_pattern_x)
+
+    plt.show()
+    plt.savefig(file)
+    plt.close()
+
+
+def plot_labels_in_row(images, logqy,  file, data='mnist'):
+
+    fig = plt.figure(figsize=(4, 1))
+
+    # setting values to rows and column variables
+    rows = 1
+    columns = 10
+    probs_qy = logqy.cpu().data.numpy()
+
+    for i in range(10):
+        fig.add_subplot(rows, columns, i+1)
+        # showing image
+        plt.imshow(images[i], cmap='gray', vmin=0, vmax=1)
+        #plt.imshow(image1)
+        plt.axis('off')
+        plt.title(str(np.round(probs_qy[0,i], decimals=3)), fontsize = 7)
+
+    plt.show()
+    plt.savefig(file)
+    plt.close()
+
 
 def mvae_loss_simple(iota_x, mask, encoder, decoder,p_z, d, K=1):
     batch_size = iota_x.shape[0]
@@ -329,13 +363,13 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
         T=1
         for i in range(T):
             transform = AffineAutoregressive(autoregressive_nn).cuda()
-            #transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
+            transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
             #transform3 = AffineAutoregressive(autoregressive_nn3).cuda()
             #transform4 = AffineAutoregressive(autoregressive_nn4).cuda()
             #transform5 = AffineAutoregressive(autoregressive_nn5).cuda()
 
             pyro.module("my_transform", transform)  
-            flow_dist = pyro.distributions.torch.TransformedDistribution(q_zgivenxobs, [transform]) #, transform2, transform3, transform4, transform5
+            flow_dist = pyro.distributions.torch.TransformedDistribution(q_zgivenxobs, [transform, transform2]) #, transform2, transform3, transform4, transform5
             zgivenx = flow_dist.rsample([K])  
             #print(z.shape)
             logqz = flow_dist.log_prob(zgivenx).reshape(K,batch_size)
@@ -383,14 +417,13 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
     #print(neg_bound)
     approx_bound = torch.mean(logpz + logpxobsgivenz)
 
-
     if iaf:
         return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(logqz - logpz), flow_dist
     else:
         return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l), z_params
 
 
-def z_loss_with_labels(iota_x, mask, p_z, p_y, means, scales, logits_y, encoder, decoder, device, d, K, K_z, data='mnist', iwae='False', evaluate=False, full = None):
+def z_loss_with_labels(iota_x, mask, p_z, p_y, means, scales, logits_y, encoder, decoder, device, d, K, K_z, data='mnist', iwae='False', evaluate=False, full = None,iaf=False, autoregressive_nn = None, autoregressive_nn2= None):
     
     batch_size = iota_x.shape[0]
     channels = iota_x.shape[1]
@@ -414,13 +447,14 @@ def z_loss_with_labels(iota_x, mask, p_z, p_y, means, scales, logits_y, encoder,
         full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
         data_flat = full_.reshape([-1,1])
         ELBO = 0
-        file_save = os.getcwd() + "/results/mnist-False--1/classification-gmms-per-class.pkl"
-        with open(file_save, 'rb') as file:
-            means_pz,std_pz,weights_pz = pickle.load(file)
+        #file_save = os.getcwd() + "/results/mnist-False--1/classification-gmms-per-class.pkl"
+        #with open(file_save, 'rb') as file:
+        #    means_pz,std_pz,weights_pz = pickle.load(file)
 
-        means_pz = torch.from_numpy(means_pz)
-        std_pz = torch.from_numpy(std_pz)
-        weights_pz = torch.from_numpy(weights_pz)
+        #means_pz = torch.from_numpy(means_pz)
+        #std_pz = torch.from_numpy(std_pz)
+        #weights_pz = torch.from_numpy(weights_pz)
+        images = np.zeros((10,28,28))
 
     for i in range(10):
         label = torch.zeros(K*K_z, 10)
@@ -431,17 +465,24 @@ def z_loss_with_labels(iota_x, mask, p_z, p_y, means, scales, logits_y, encoder,
             logqy = torch.Tensor.repeat(torch.log(probs_qy[0,i]), [K]).reshape([K,batch_size])
 
         q_zgiveny = td.Independent(td.Normal(loc=means[i,:], scale=torch.nn.Softplus()(scales[i,:])),1)
-        zgiveny = q_zgiveny.rsample([K*K_z]) # 
 
-        #print(zgiveny.shape)
-        if evaluate:
-            #p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_pz[i].cuda()), td.Independent(td.Normal(means_pz[i].cuda(), std_pz[i].cuda()), 1))
-            logpz = p_z.log_prob(zgiveny).reshape([K,batch_size]).reshape([K,batch_size])
-            logqz = q_zgiveny.log_prob(zgiveny).reshape([K,batch_size]).reshape([K,batch_size])
-            #print(logpz.shape)
-
-        k_l_z = latent_loss(means[i,:].reshape(1,d), torch.nn.Softplus()(scales[i,:]).reshape(1,d))
-        #print(k_l_z.shape)
+        if iaf:
+            transform = AffineAutoregressive(autoregressive_nn).cuda()
+            transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
+            #transform = AffineAutoregressive(autoregressive_nn[i]).cuda()
+            #transform2 = AffineAutoregressive(autoregressive_nn2[i]).cuda()
+            pyro.module("my_transform", transform)  
+            flow_dist = pyro.distributions.torch.TransformedDistribution(q_zgiveny, [transform, transform2]) #, transform2, transform3, transform4, transform5
+            zgiveny = flow_dist.rsample([K])  
+            logqz = flow_dist.log_prob(zgiveny).reshape(K,batch_size)
+            logpz = p_z.log_prob(zgiveny).reshape(K,batch_size)    
+            k_l_z = torch.mean(logqz - logpz)
+        else:
+            zgiveny = q_zgiveny.rsample([K*K_z])
+            k_l_z = latent_loss(means[i,:].reshape(1,d), torch.nn.Softplus()(scales[i,:]).reshape(1,d))
+            logqz = q_zgiveny.log_prob(zgiveny).reshape(K,batch_size)
+            logpz = p_z.log_prob(zgiveny).reshape(K,batch_size)    #print("sampled z ---",zgivenx)
+        
         zgivenx_y = torch.cat((zgiveny,label.to(device,dtype = torch.float)),1)
         zgivenxy_flat = zgivenx_y.reshape([K*K_z*batch_size,d+10])
         all_logits_obs_model = decoder.forward(zgivenxy_flat)
@@ -457,28 +498,36 @@ def z_loss_with_labels(iota_x, mask, p_z, p_y, means, scales, logits_y, encoder,
         logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size]) 
         logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,batch_size]) 
 
-        #print(logpxobsgivenz.shape)
-        #print(torch.mean(logpxobsgivenz) - k_l_z, probs_qy[0,i].item(),probs_qy[0,i]*(torch.mean(logpxobsgivenz) - k_l_z).item())
-
         if evaluate:
             #print(logpxobsgivenz.shape, logpxmissgivenz.shape, logpz.shape, logpy.shape, logqy.shape, logqz.shape, probs_qy[0,i])
             ELBO += torch.logsumexp(logpxmissgivenz + logpz + logpy - logqy - logqz,0)*probs_qy[0,i]
+            index_ = torch.argmax(logpxmissgivenz + logpz + logpy - logqy - logqz)
+            print(index_)
+            predicted_image = iota_x
+            predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K,1,1,28,28)[index_,~mask])
+            print(logpxmissgivenz[index_] + logpz[index_] + logpy[index_] - logqy[index_] - logqz[index_])
+            images[i] = np.squeeze(predicted_image.cpu().data.numpy())
+            
+            #plot_image(np.squeeze(img),)
         else:
-            ELBO += probs_qy[0,i]*(torch.mean(logpxobsgivenz) - k_l_z)[0]
+            if not iaf:
+                ELBO += probs_qy[0,i]*(torch.mean(logpxobsgivenz) - k_l_z)[0]
+            else:
+                ELBO += probs_qy[0,i]*(torch.mean(logpxobsgivenz) - torch.mean(logqz - logpz))
 
-    #print(ELBO)
+    if evaluate:
+        results = os.getcwd() + "/results/mnist-False--1/compiled/"
+        if not iaf:
+            plot_labels_in_row(images, probs_qy, results + "-gaussian_labels.png")
+        else:
+            plot_labels_in_row(images, probs_qy, results + "-iaf_labels.png")
 
-    #print(kl_y)
     neg_bound = - ELBO
-
-    #print(neg_bound)
     approx_bound = ELBO
-    #print(-torch.mean(logpxobsgivenz).item(), torch.mean(k_l).item())
-    #print(logpxobsgivenz, k_l)
-    #print(neg_bound)
+
     return neg_bound, approx_bound, torch.mean(logpxobsgivenz), torch.mean(kl_y), torch.mean(k_l_z)
 
-def mixture_loss_labels(iota_x, mask, means_pz, std_pz , weights_pz,  means, scales, logits, logits_y, decoder, device, d, K=1, K_z=1, data='mnist', beta=1, num_components=10, iwae=False, evaluate=False, full = None):
+def mixture_loss_labels(iota_x, mask, p_z,  means, scales, logits, logits_y, decoder, device, d, K=1, K_z=1, data='mnist', beta=1, num_components=10, iwae=False, evaluate=False, full = None):
     batch_size = iota_x.shape[0]
     channels = iota_x.shape[1]
     p = iota_x.shape[2]
@@ -511,9 +560,10 @@ def mixture_loss_labels(iota_x, mask, means_pz, std_pz , weights_pz,  means, sca
         full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
         data_flat = full_.reshape([-1,1])
         ELBO = 0
-
+        images = np.zeros((10,28,28))
     if iwae:
         ELBO = 0
+
 
     for comp in range(10):
         label = torch.zeros(K*K_z,10)
@@ -526,7 +576,7 @@ def mixture_loss_labels(iota_x, mask, means_pz, std_pz , weights_pz,  means, sca
         #print("Shape of py --", logpy.shape)
         p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
 
-        q_zgiveny = ReparameterizedNormalMixture1d(logits[comp].reshape(1,num_components), means[comp].reshape(1, num_components, d), scales[comp].exp().reshape(1, num_components, d))
+        q_zgiveny = ReparameterizedNormalMixture1d(logits[comp].reshape(1,num_components), means[comp].reshape(1, num_components, d), torch.nn.Softplus()(scales[comp]).reshape(1, num_components, d))
         zgiveny = q_zgiveny.rsample([K*K_z]).reshape(K*K_z,d) 
 
         ##Calculating log probabilities of z samples
@@ -552,15 +602,27 @@ def mixture_loss_labels(iota_x, mask, means_pz, std_pz , weights_pz,  means, sca
 
         if evaluate:
             ELBO += torch.logsumexp(logpxmissgivenz + logpz + logpy - logqy - logqz,0)*probs_qy[0,comp]
+            index_ = torch.argmax(logpxmissgivenz + logpz + logpy - logqy - logqz)
+            predicted_image = iota_x
+            predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K,1,1,28,28)[index_,~mask])
+            print(logpxmissgivenz[index_] + logpz[index_] + logpy[index_] - logqy[index_] - logqz[index_])
+            #img = predicted_image.cpu().data.numpy()
+            images[comp] = np.squeeze(predicted_image.cpu().data.numpy())
+            
         elif iwae:
             #print(torch.logsumexp(logpxobsgivenz + logpz + logpy - logqy - logqz,0).shape)
             ELBO += torch.logsumexp(logpxobsgivenz + logpz + logpy - logqy - logqz,0)*probs_qy[0,comp]
         else:
             ELBO += probs_qy[0,comp]*(torch.mean(logpxobsgivenz) - k_l_z)
+            
 
         #neg_bound += (logpxobsgivenz + beta*logpz + beta*logpy - beta*logqz - beta*logqy)*torch.exp(logqy) 
         approx_bound += logpz + logpxobsgivenz
         
+    if evaluate:
+        results = os.getcwd() + "/results/mnist-False--1/compiled/"
+        plot_labels_in_row(images, probs_qy, results + "-mixture_labels.png")
+
     neg_bound = - (ELBO).to(device,dtype = torch.float) # + beta*td.Categorical(logits=logits).entropy() - beta*td.Categorical(logits=logits).entropy().detach() 
     approx_bound = torch.mean(approx_bound)
 
@@ -656,7 +718,7 @@ def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K
     if data=='svhn':
         sigma_decoder = decoder.get_parameter("log_sigma")
     #iota_x_[~mask_] =  p_xm.rsample([K]).reshape(-1)   
-    q_z = ReparameterizedNormalMixture1d(logits, means, scales.exp())
+    q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
 
     k_l = torch.zeros(K,batch_size)
     zgivenx = torch.zeros(K*batch_size,d)
@@ -669,7 +731,7 @@ def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K
     logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)
     #print(logpz)
     k_l = torch.mean(logqz - logpz)
-    #k_l = latent_loss(means, torch.nn.Softplus()(scales.exp()))
+    #k_l = latent_loss(means, torch.nn.Softplus()(torch.nn.Softplus()(scales)))
 
     #print(iota_x_)
 
@@ -889,6 +951,7 @@ def mvae_impute(iota_x,mask,encoder,decoder,p_z, d, L=1, with_labels=False, labe
     p = iota_x.shape[2]
     q = iota_x.shape[3]
     #iota_x = torch.reshape(iota_x, (batch_size, p*q))
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     out_encoder = encoder.forward(iota_x)
     q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
@@ -896,7 +959,9 @@ def mvae_impute(iota_x,mask,encoder,decoder,p_z, d, L=1, with_labels=False, labe
     zgivenx = q_zgivenxobs.rsample([L])
     if with_labels:
         #print(zgivenx.shape, labels.shape)
-        labels = labels.reshape(1,labels.shape[0],10)
+        ##No information in labels
+        labels = torch.zeros(1,labels.shape[0],10).to(device,dtype = torch.float)
+        #labels = labels.reshape(1,labels.shape[0],10)
         #labels = labels.repeat(L)
         zgivenx_y = torch.cat((zgivenx,labels),2)
         #print(zgivenx_y.shape)

@@ -487,6 +487,49 @@ def compare_ELBO_helper(loss1, loss2, loss3, loss4, loss5, colours, x, ylabel, s
 	plt.savefig(save_location)
 	plt.close()
 
+def compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, loss1, loss2, loss3, loss4, colours, x, ylabel, save_location, ylim1= None, ylim2 = None):
+
+	x__ = np.arange(10)
+	ys = [i+x__+(i*x__)**2 for i in range(10)]
+	colours = cm.rainbow(np.linspace(0, 1, len(ys)))
+	fig = plt.figure(1)
+	ax = fig.add_subplot(111)
+
+	ms = 12
+	ax.plot(x, lower_bound, color=colours[0], label="0's", markersize=ms)
+	ax.plot(x, upper_bound, color=colours[1], label="True", markersize=ms)
+	ax.plot(x, bound_updated_encoder, color=colours[2], label="0's + tuned encoder (train)", markersize=ms)
+	ax.plot(x, bound_updated_test_encoder, color=colours[3], label="0's + tuned encoder (test)", markersize=ms)
+
+	ax.plot(x, pseudo_gibbs_iwae, color=colours[8], label="Pseudo Gibbs", markersize=ms)
+	ax.plot(x, metropolis_within_gibbs_iwae, color=colours[9], label="Metropolis Within Gibbs", markersize=ms)
+
+	ax.plot(x, loss1, color=colours[4], label="Gaussian", markersize=ms)
+	ax.plot(x, loss2, color=colours[5], label="IAF", markersize=ms)
+	ax.plot(x, loss3, color=colours[6], label="Mixture", markersize=ms)
+	ax.plot(x, loss4, color=colours[7], label="Mixture (re-inits)", markersize=ms)
+	
+	#ax.xlabel()
+	#ax.ylabel() 
+	
+	if ylim1 is not None:
+		ax.ylim(ylim1, ylim2)
+
+	#plt.ylim(top=0)
+	#lgd = ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
+	#lgd = ax.legend(loc='lower center', ncol=5)
+	lgd = ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+	ax.set_title('IWAE bounds vs #Samples')
+	ax.set_xlabel('Samples')
+	ax.set_ylabel(ylabel)   
+
+	#plt.show()
+	#plt.savefig()
+	fig.savefig(save_location, dpi=300, format='png', bbox_extra_artists=(lgd,), bbox_inches='tight')
+
+	#plt.close()
+
 def plot_curve(y,num_epochs, file):
 	x = np.arange(1, num_epochs + 1, 1).reshape(num_epochs)
 	plt.plot(x, y)
@@ -562,6 +605,27 @@ def plot_images_in_row(num_epochs, loc1, loc2, loc3, loc4, loc5, file, data='mni
 	plt.imshow(image5)
 	plt.axis('off')
 	plt.title(str(int(num_epochs) ) )
+
+	plt.show()
+	plt.savefig(file)
+	plt.close()
+
+
+def plot_labels_in_row(images, logqy,  file, data='mnist'):
+
+	fig = plt.figure(figsize=(4, 1))
+
+	# setting values to rows and column variables
+	rows = 1
+	columns = 10
+
+	for i in range(10):
+		fig.add_subplot(rows, columns, i+1)
+		# showing image
+		plt.imshow(images[i])
+		#plt.imshow(image1)
+		plt.axis('off')
+		plt.title("q:" + str(logqy[0,i]))
 
 	plt.show()
 	plt.savefig(file)
