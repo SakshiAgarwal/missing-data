@@ -442,7 +442,6 @@ for K_samples in K_samples_ :
                 z_params.append(params)
 
                 prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
-
                 
                 ##with random re-inits
                 start_mix = datetime.now()

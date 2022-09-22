@@ -177,7 +177,9 @@ mixture_mse = np.zeros((num_epochs_test))
 mixture_loss_inits =  np.zeros((num_epochs_test))
 xm_loss_NN = np.zeros((num_epochs_test))
 xm_mse_NN = np.zeros((num_epochs_test))
-
+iaf_gaussian_loss = np.zeros((num_epochs_test))
+iaf_mixture_loss =  np.zeros((num_epochs_test))
+iaf_mixture_reinits_loss =  np.zeros((num_epochs_test))
 
 #term1 = np.zeros((6, 10, num_epochs_test))  #loglikelihood
 #term2 = np.zeros((6, 10, num_epochs_test))  #KL
@@ -237,12 +239,18 @@ for K_samples in K_samples_ :
             z_params = []
             mixture_params_inits = []
             mixture_params = []
+            iaf_gaussian_params = []
+            iaf_mixture_params = []
+            iaf_mixture_params_re_inits = []
 
             for data in test_loader:
-                #if nb<20:
-                #continue
-                #if nb==30:
-                #    break
+                nb+=1
+
+                if nb<20:
+                    continue
+                if nb>=21:
+                    break
+
                 if nb == num_images_to_run:
                     break
 
@@ -257,12 +265,12 @@ for K_samples in K_samples_ :
                 random = False
 
                 img = b_full.cpu().data.numpy()         ## added .data
-                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
+                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
 
                 missing = b_data
                 missing[~b_mask] = 0.5      
                 img = missing.cpu().data.numpy() 
-                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
+                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
 
                 #lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
                 #upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
@@ -334,7 +342,7 @@ for K_samples in K_samples_ :
                 #Impute image with pseudo-gibbs
                 pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
                 pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
-                #plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
+                plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
 
                 ##M-with-gibbs sampler
                 start_m = datetime.now()
@@ -353,7 +361,7 @@ for K_samples in K_samples_ :
                 #Impute image with metropolis-within-pseudo-gibbs
                 metropolis_image = b_data.to(device,dtype = torch.float)
                 metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
-                #plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
+                plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
 
                 if dd:
                     if iterations==-1:
@@ -461,6 +469,34 @@ for K_samples in K_samples_ :
                 mixture_iwae +=iwae
                 mixture_loss += z_nelbo_
 
+
+                z_init =  encoder.forward(b_data.to(device,dtype = torch.float))
+                start_mix = datetime.now()
+                xm_nelbo_, xm_error_, iwae, t1, t2, z_params = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, p_z_eval = p_z_eval, with_gaussian=True  )
+                end_mix = datetime.now()
+                diff_mix = end_mix - start_mix
+                print("Time taken for optimizing IAF + Gaussian : ", diff_mix.total_seconds())
+                iaf_gaussian_params.append([t1.state_dict(), t2.state_dict(), z_params]) 
+                iaf_gaussian_loss += xm_nelbo_
+
+                #Without re-inits
+                start_mix = datetime.now()
+                z_nelbo_, z_error_, iwae, logits, means, scales, t1, t2 = optimize_mixture_IAF(num_epochs = num_epochs_test, p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples, do_random=False)
+                end_mix = datetime.now()
+                diff_mix = end_mix - start_mix
+                print("Time taken for optimizing IAF + Mixture : ", diff_mix.total_seconds())
+                iaf_mixture_params.append([t1.state_dict(), t2.state_dict(), logits, means, scales])
+                iaf_mixture_loss += z_nelbo_
+                #Without re-inits
+                start_mix = datetime.now()
+                z_nelbo_, z_error_, iwae, logits, means, scales, t1, t2 = optimize_mixture_IAF(num_epochs = num_epochs_test, p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples, do_random=True)
+                end_mix = datetime.now()
+                diff_mix = end_mix - start_mix
+                print("Time taken for optimizing IAF + Mixture (Re-inits): ", diff_mix.total_seconds())
+                iaf_mixture_params_re_inits.append([t1.state_dict(), t2.state_dict(), logits, means, scales])
+                iaf_mixture_reinits_loss  += z_nelbo_
+
+
                 #mixture_loss_samples[nb%10, iterations, samples_iter] = z_nelbo_[-1]
 
                 prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
@@ -475,11 +511,11 @@ for K_samples in K_samples_ :
                 file_save_params = results + str(-1) + "/pickled_files/TH-params_mnist.pkl"
 
                 with open(file_save_params, 'wb') as file:
-                    pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
+                    pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params, iaf_gaussian_params, iaf_mixture_params, iaf_mixture_params_re_inits, nb], file)
 
                 file_loss = results + str(-1) + "/pickled_files/TH-loss.pkl"
                 with open(file_loss, 'wb') as file:
-                    pickle.dump([xm_loss,xm_loss_NN,z_loss,iaf_loss,mixture_loss_inits,mixture_loss,nb], file)
+                    pickle.dump([xm_loss,xm_loss_NN,z_loss,iaf_loss,mixture_loss_inits,mixture_loss, iaf_gaussian_loss, iaf_mixture_loss, iaf_mixture_reinits_loss,  nb], file)
 
                 #compare_ELBO(num_epochs_test, xm_loss/num_images_to_run, iaf_loss/num_images_to_run, z_loss/num_images_to_run, mixture_loss_inits/num_images_to_run, mixture_loss/num_images_to_run , results, -1, image = 0) #ylim1= value - 50,ylim2 = value + 20,
 

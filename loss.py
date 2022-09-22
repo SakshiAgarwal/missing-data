@@ -608,7 +608,6 @@ def mixture_loss_labels(iota_x, mask, p_z,  means, scales, logits, logits_y, dec
             print(logpxmissgivenz[index_] + logpz[index_] + logpy[index_] - logqy[index_] - logqz[index_])
             #img = predicted_image.cpu().data.numpy()
             images[comp] = np.squeeze(predicted_image.cpu().data.numpy())
-            
         elif iwae:
             #print(torch.logsumexp(logpxobsgivenz + logpz + logpy - logqy - logqz,0).shape)
             ELBO += torch.logsumexp(logpxobsgivenz + logpz + logpy - logqy - logqz,0)*probs_qy[0,comp]
@@ -701,7 +700,8 @@ def z_loss_with_labels_iwae(iota_x, mask, p_z, p_y, means, scales, logits_y, enc
     #print(neg_bound)
     return neg_bound, approx_bound, torch.mean(logpxobsgivenz), torch.mean(logqz), torch.mean(logqy)
 
-def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K=1, K_z=1, data='mnist', beta=1, evaluate=False, full = None):
+def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K=1, K_z=1, data='mnist', beta=1, evaluate=False, full = None, iaf=False, autoregressive_nn=None, autoregressive_nn2= None):
+    ##Not needed I guess
     mix = td.categorical.Categorical(torch.ones(d,).cuda())  
     num_components = logits.shape[1]
     batch_size = iota_x.shape[0]
@@ -724,34 +724,32 @@ def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K
     zgivenx = torch.zeros(K*batch_size,d)
 
     #print(iota_x_)
+    if iaf:
+        #zgivenx, k_l, flow_dist = inverse_autoregressive_flow(q_zgivenxobs, p_z, autoregressive_nn, d, K)
+        transform = AffineAutoregressive(autoregressive_nn).cuda()
+        transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
 
-    zgivenx = q_z.rsample([K*K_z])
-    ##what is the kl??
-    logqz = q_z.log_prob(zgivenx).reshape(K,batch_size)
-    logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)
-    #print(logpz)
-    k_l = torch.mean(logqz - logpz)
-    #k_l = latent_loss(means, torch.nn.Softplus()(torch.nn.Softplus()(scales)))
-
-    #print(iota_x_)
-
-    #print("sampled z ---",zgivenx)
-    #print("KL from sampled z ---", k_l)
+        pyro.module("my_transform", transform)  
+        flow_dist = pyro.distributions.torch.TransformedDistribution(q_z, [transform, transform2]) #, transform2, transform3, transform4, transform5
+        zgivenx = flow_dist.rsample([K])  
+        logqz = flow_dist.log_prob(zgivenx).reshape(K,batch_size)
+        logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)    
+        k_l = torch.mean(logqz - logpz)
+    else:
+        zgivenx = q_z.rsample([K*K_z])
+        logqz = q_z.log_prob(zgivenx).reshape(K,batch_size)
+        logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)
+        k_l = torch.mean(logqz - logpz)
 
     zgivenx_flat = zgivenx.reshape([K*K_z*batch_size,d])
-    #print(iota_x_)
     all_logits_obs_model = decoder.forward(zgivenx_flat)
-    #print(all_logits_obs_model, torch.sum(torch.isnan(all_logits_obs_model)))
-
-    #print(iota_x_)
     data_flat = iota_x_.reshape([-1,1])
     tiledmask = mask_.reshape([K*batch_size,channels*p*q]).cuda()
 
     if evaluate:
         full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
         data_flat = full_.reshape([-1,1])
-    #print(data_flat)
-    #print(all_logits_obs_model)
+
     if data=='mnist':
         all_log_pxgivenz_flat = td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model.reshape([-1,1])).log_prob(data_flat)
     else:
@@ -767,7 +765,10 @@ def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K
     if evaluate:
         neg_bound =  - torch.mean(torch.logsumexp(logpxmissgivenz + logpz - logqz,0))
 
-    return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l)
+    if iaf:
+        return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l), flow_dist
+    else:
+        return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l)
 
 
 

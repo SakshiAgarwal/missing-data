@@ -169,8 +169,15 @@ K_samples = 1000
 
 for iterations in range(1):
     for i in [-1]:
-        p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
-        p_z_eval = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+        #p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+        #p_z_eval = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+
+        means_ = torch.from_numpy(gm.means_)
+        std_ = torch.sqrt(torch.from_numpy(gm.covariances_))
+        weights_ = torch.from_numpy(gm.weights_)
+
+        p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
+        p_z_eval = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
 
         ### Get test loader for different missing percentage value
         #print("memory before --" )
@@ -441,13 +448,13 @@ for iterations in range(1):
 
             print(lower_bound/nb, upper_bound/nb, bound_updated_encoder/nb, pseudo_iwae/nb, m_iwae/nb,  xm_iwae/nb,  xm_NN_iwae/nb,  iaf_iwae/nb, z_iwae/nb, mixture_iwae/nb, mixture_iwae_inits/nb) #added mixture_iwae_inits later
 
-            file_save_params = results + str(-1) + "/pickled_files/params_svhn_patches.pkl"
+            file_save_params = results + str(-1) + "/pickled_files/params_svhn_patches_mixtures.pkl"
 
             with open(file_save_params, 'wb') as file:
                 pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
                 #pickle.dump([iaf_gaussian_params, iaf_mixture_params ,iaf_mixture_params_re_inits ,nb], file)
 
-            file_loss = results + str(-1) + "/pickled_files/loss_svhn_patches.pkl"
+            file_loss = results + str(-1) + "/pickled_files/loss_svhn_patches_mixtures.pkl"
             with open(file_loss, 'wb') as file:
                 pickle.dump([z_loss, mixture_loss_inits, mixture_loss, iaf_loss,  nb], file)
                 #pickle.dump([iaf_gaussian_loss, iaf_mixture_loss, iaf_mixture_reinits_loss, nb], file)

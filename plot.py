@@ -511,7 +511,7 @@ def compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_
 	
 	#ax.xlabel()
 	#ax.ylabel() 
-	
+
 	if ylim1 is not None:
 		ax.ylim(ylim1, ylim2)
 
@@ -520,8 +520,8 @@ def compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_
 	#lgd = ax.legend(loc='lower center', ncol=5)
 	lgd = ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
-	ax.set_title('IWAE bounds vs #Samples')
-	ax.set_xlabel('Samples')
+	#ax.set_title('IWAE bounds vs #Samples')
+	ax.set_xlabel('#Samples')
 	ax.set_ylabel(ylabel)   
 
 	#plt.show()
@@ -609,6 +609,27 @@ def plot_images_in_row(num_epochs, loc1, loc2, loc3, loc4, loc5, file, data='mni
 	plt.show()
 	plt.savefig(file)
 	plt.close()
+
+def plot_images_comparing_methods(images, file, data='mnist'):
+	fig = plt.figure(figsize=(4, 1))
+
+	# setting values to rows and column variables
+	rows = 1
+	columns = 10
+
+	for i in range(len(images)):
+		fig.add_subplot(rows, columns, i+1)
+		# showing image
+		plt.imshow(images[i], cmap='gray', vmin=0, vmax=1)
+		#plt.imshow(image1)
+		plt.axis('off')
+		#plt.title("0 ")
+
+	plt.show()
+	plt.savefig(file)
+	plt.close()
+
+
 
 
 def plot_labels_in_row(images, logqy,  file, data='mnist'):

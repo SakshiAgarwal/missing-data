@@ -21,19 +21,24 @@ def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_s
 	#embeddings = []
 	print(batch_size)
 	for data in train_loader:
-		b_data, b_mask, b_full, labels_one_hot  = data
-		#labels = torch.argmax(labels_one_hot, dim=1).item()
-		b_full = b_full.to(device,dtype = torch.float)
-
-		out_encoder = encoder.forward(b_full)
-
-		if not with_labels:
+		if data=='mnist':
+			b_data, b_mask, b_full, labels_one_hot  = data
+			#labels = torch.argmax(labels_one_hot, dim=1).item()
+			b_full = b_full.to(device,dtype = torch.float)
+			out_encoder = encoder.forward(b_full)
+			if not with_labels:
+				embeddings[ nb : nb + b_data.shape[0], :] = out_encoder.cpu().data.numpy().astype(float)
+				nb += b_data.shape[0]
+			else:
+				print(labels)
+				embeddings[int(labels), int(nb[labels]), :] = out_encoder.cpu().data.numpy().astype(float)
+				nb[labels] += 1
+		else:
+			b_data, b_mask = data
+			b_data = b_data.to(device,dtype = torch.float)
+			out_encoder = encoder.forward(b_data)
 			embeddings[ nb : nb + b_data.shape[0], :] = out_encoder.cpu().data.numpy().astype(float)
 			nb += b_data.shape[0]
-		else:
-			print(labels)
-			embeddings[int(labels), int(nb[labels]), :] = out_encoder.cpu().data.numpy().astype(float)
-			nb[labels] += 1
 
 	if not with_labels:
 		embeddings = embeddings[~np.all(embeddings == 0, axis=1)]

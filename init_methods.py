@@ -8,7 +8,30 @@ from plot import *
 
 
 def burn_in(b_data, b_mask, labels, encoder, decoder, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
+	channels = b_data.shape[1]
+	p = b_data.shape[2]
+	q = b_data.shape[3]
+	if data=='mnist':
+		x_logits = torch.log(b_data/(1-b_data)).reshape(1,channels,p,q)
+	else:
+		x_logits = b_data.reshape(1,channels,p,q)
 
+	if data=='mnist':
+		z_init =  mvae_impute(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, with_labels=with_labels, labels= labels)[1]
+		for l in range(burn_in_period):
+			x_logits, z_init = mvae_impute(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, with_labels=with_labels, labels= labels)
+			x_logits = x_logits.reshape(1,1,p,q)
+			b_data[0,0,:,:].reshape([1,1,28,28])[~b_mask] = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits),1).sample()[~b_mask]
+	else: 
+		z_init =  mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1)[1]
+		for l in range(burn_in_period):
+			x_logits, z_init, sigma_decoder = mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1)
+			x_logits = x_logits.reshape(1,channels,p,q)
+			b_data[~b_mask] = td.Normal(loc = x_logits, scale =  sigma_decoder.exp()*(torch.ones(*x_logits.shape).cuda())).sample()[~b_mask]
+
+	return x_logits, b_data, z_init
+
+def burn_in_svhn(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
 	channels = b_data.shape[1]
 	p = b_data.shape[2]
 	q = b_data.shape[3]
@@ -642,14 +665,14 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 	scales[:,...] = out_encoder[...,d:]
 
 	sigma = torch.sum(scales.exp(),2)
-	print(torch.sum(means,2))
+	#print(torch.sum(means,2))
 	sigma = torch.Tensor.repeat(sigma.reshape(batch_size, num_components, 1), [1,1,d])
 
 	means +=  (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 
 	#means +=  torch.mul(scales.exp(), (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 )# Add random noise between [-1,1]
 	#scales = -1*torch.ones(batch_size, num_components, d)
 
-	print(torch.sum(means,2), torch.sum(scales.exp(),2))
+	#print(torch.sum(means,2), torch.sum(scales.exp(),2))
 	
 	repeat = True
 	if repeat == False:

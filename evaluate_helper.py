@@ -48,9 +48,9 @@ def pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q,d, 
 	logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K_samples,1]) 
 	logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K_samples,1]) 
 
-	return logpxmissgivenz
+	return logpxmissgivenz, all_logits_obs_model
 
-def evaluate_z(p_z, b_full, b_mask, z_params, decoder, device, d, results, nb , K_samples, data='mnist', ismixture=False):
+def evaluate_z(p_z, b_data, b_full, b_mask, z_params, decoder, device, d, results, nb , K_samples, data='mnist', ismixture=False):
 
 	if ismixture:
 		[logits, means, scales] = z_params
@@ -66,13 +66,18 @@ def evaluate_z(p_z, b_full, b_mask, z_params, decoder, device, d, results, nb , 
 	logqz = q_z.log_prob(zgivenx).reshape(K_samples,1)
 	logpz = p_z.log_prob(zgivenx).reshape(K_samples,1) 
 
-	logpxmissgivenz = pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q,d, data)
+	logpxmissgivenz, all_logits_obs_model = pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q,d, data)
 
 	iwae = np.zeros(K_samples)
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	return iwae
+	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	predicted_image = b_data
+	predicted_image[~b_mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~b_mask])
+	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+
+	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
 
 def eval_baseline(K_samples, p_z, encoder, decoder, iota_x, full, mask, d, data='mnist', with_labels=False):
 
@@ -95,13 +100,19 @@ def eval_baseline(K_samples, p_z, encoder, decoder, iota_x, full, mask, d, data=
 	else:
 		zgivenx_flat = zgivenx.reshape([K_samples,d])
 
-	logpxmissgivenz = pass_decoder(K_samples, zgivenx_flat, decoder, full, mask, channels, p, q,d, data)
+	logpxmissgivenz, all_logits_obs_model = pass_decoder(K_samples, zgivenx_flat, decoder, full, mask, channels, p, q,d, data)
 
 	iwae = np.zeros(K_samples)
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	return iwae
+	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	predicted_image = iota_x
+	predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
+	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+	#img = predicted_image.cpu().data.numpy()
+
+	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
 
 
 def evaluate_pseudo_gibbs(K_samples, p_z, encoder, decoder, x_init, iota_x, full, mask, d, device, data='mnist', with_labels=False):
@@ -129,13 +140,18 @@ def evaluate_pseudo_gibbs(K_samples, p_z, encoder, decoder, x_init, iota_x, full
 		iota_x[~mask] = xgivenz.sample().reshape(1,channels,p,q)[~mask]
 
 	logpz = p_z.log_prob(zgivenx).reshape(K_samples,1) 
-	logpxmissgivenz = pass_decoder(K_samples, zgivenx, decoder, full, mask, channels, p, q, d, data)
+	logpxmissgivenz, all_logits_obs_model = pass_decoder(K_samples, zgivenx, decoder, full, mask, channels, p, q, d, data)
 
 	iwae = np.zeros(K_samples)
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	return iwae
+	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	predicted_image = iota_x
+	predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
+	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+
+	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
 
 
 def evaluate_metropolis_within_gibbs(K_samples, p_z, encoder, decoder, x_init, iota_x, full, mask, d, device, data='mnist', with_labels=False):
@@ -147,13 +163,21 @@ def evaluate_metropolis_within_gibbs(K_samples, p_z, encoder, decoder, x_init, i
 	zgivenx, logqz  = m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results=os.getcwd() + "/results/mnist-False-", nb=0, iterations=0, K=1, T=K_samples, data='mnist', evaluate=True)
 	#logqz = q_zgivenxobs.log_prob(zgivenx).reshape(K_samples,1)
 	logpz = p_z.log_prob(zgivenx).reshape(K_samples,1) 
-	logpxmissgivenz = pass_decoder(K_samples, zgivenx, decoder, full, mask, channels, p, q, d, data)
+	logpxmissgivenz, all_logits_obs_model = pass_decoder(K_samples, zgivenx, decoder, full, mask, channels, p, q, d, data)
 
+	logqz = logqz.reshape(K_samples,1)
+	logpxmissgivenz = logpxmissgivenz.reshape(K_samples,1)
 	iwae = np.zeros(K_samples)
 	for i in np.arange(K_samples):
+		#print(logpxmissgivenz[:i] + logpz[:i] - logqz[:i])
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	return iwae
+	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	predicted_image = iota_x
+	predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
+	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+
+	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
 
 
 def evaluate_iaf(p_z, b_data, b_full, b_mask, iaf_params, encoder, decoder, device, d, results, nb , K_samples, data='mnist'):
@@ -180,12 +204,19 @@ def evaluate_iaf(p_z, b_data, b_full, b_mask, iaf_params, encoder, decoder, devi
 	logqz = flow_dist.log_prob(zgivenx).reshape(K_samples,1)
 	logpz = p_z.log_prob(zgivenx).reshape(K_samples,1) 
 
-	logpxmissgivenz = pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q, d, data)
+	logpxmissgivenz, all_logits_obs_model  = pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q, d, data)
 
 	iwae = np.zeros(K_samples)
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	return iwae
+
+	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	predicted_image = b_data
+	predicted_image[~b_mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~b_mask])
+	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+
+
+	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
 
 

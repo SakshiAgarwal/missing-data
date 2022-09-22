@@ -12,13 +12,14 @@ from sklearn.manifold import TSNE
 from data import *
 import matplotlib.pyplot as plt
 
-def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labels=False, labels= None, batch_size = 64):
-
+def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labels=False, labels= None, data='mnist' ):
+	channels = iota_x.shape[1]
+	p = iota_x.shape[2]
+	q = iota_x.shape[3]
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	out_encoder = encoder.forward(iota_x)
 	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
-	
 	zgivenx = q_zgivenxobs.rsample([K]).reshape(K,d) 
 
 	if with_labels:
@@ -30,14 +31,25 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 		zgivenx_flat = zgivenx.reshape([K,d])
 
 	x_logits_e = decoder.forward(zgivenx_flat)
-	xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_e.reshape([-1,1])),1)
+
+	if data=='mnist':
+		xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_e.reshape(-1)),1)
+	else:
+		sigma_decoder = decoder.get_parameter("log_sigma")
+		xgivenz = td.Normal(loc = x_logits_e.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1]))
 
 	full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
-	mask_ = torch.Tensor.repeat(mask,[K,1,1,1]).reshape([K,28*28])
+	mask_ = torch.Tensor.repeat(mask,[K,1,1,1]).reshape([K,channels*p*q])
 
 	data_flat = full_.reshape([-1,1])
-	all_log_pxgivenz_flat = xgivenz.log_prob(data_flat)
-	all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K,28*28])
+
+	if data=='mnist':
+	    all_log_pxgivenz_flat = td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_e.reshape([-1,1])).log_prob(data_flat)
+	else:
+	    all_log_pxgivenz_flat = td.Normal(loc = x_logits_e.reshape([-1,1]), scale = sigma_decoder.exp()*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+
+	#all_log_pxgivenz_flat = xgivenz.log_prob(data_flat)
+	all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K,channels*p*q])
 	logpmissgivenz = torch.sum(all_log_pxgivenz*(~mask_),1).reshape([K,1])
 
 	logpz = p_z.log_prob(zgivenx).reshape([K,1])
@@ -45,42 +57,6 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 	iwae_bound = torch.logsumexp(logpmissgivenz + logpz - logqz, 0)
 
 	return iwae_bound
-
-
-def eval_iwae_bound_parallel(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labels=False, labels= None, batch_size = 64):
-	out_encoder = encoder.forward(iota_x)
-	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
-
-	n_batches = int(K/batch_size)
-	#zgivenx = torch.zeros(n_batches*batch_size,d)
-	for i in range(n_batches):
-		#zgivenx[i*batch_size:(i+1)*batch_size] = q_zgivenxobs.rsample([batch_size]).reshape(batch_size,d)  ##batch_size was K previously
-		zgivenx = q_zgivenxobs.rsample([batch_size]).reshape(batch_size,d)  ##batch_size was K previously
-
-		if with_labels:
-			labels = torch.Tensor.repeat(labels,[batch_size,1]) 
-			zgivenx_y = torch.cat((zgivenx,labels),1)
-			zgivenx_flat = zgivenx_y.reshape([batch_size,d+10])
-		else:
-			zgivenx_flat = zgivenx.reshape([batch_size,d])
-
-	x_logits_e = decoder.forward(zgivenx_flat)
-	xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_e.reshape([-1,1])),1)
-
-	full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
-	mask_ = torch.Tensor.repeat(mask,[K,1,1,1]).reshape([K,28*28])
-
-	data_flat = full_.reshape([-1,1])
-	all_log_pxgivenz_flat = xgivenz.log_prob(data_flat)
-	all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K,28*28])
-	logpmissgivenz = torch.sum(all_log_pxgivenz*(~mask_),1).reshape([K,1])
-
-	logpz = p_z.log_prob(zgivenx).reshape([K,1])
-	logqz = q_zgivenxobs.log_prob(zgivenx).reshape([K,1])
-	iwae_bound = torch.logsumexp(logpmissgivenz + logpz - logqz, 0)
-
-	return iwae_bound
-
 
 def pseudo_gibbs(sampled_image, b_data, b_mask, encoder, decoder, p_z,  d, results, iterations, T=100, nb=0, K=1, data='mnist', full = None, evaluate=False,with_labels=False, labels = None):
 	batch_size = b_data.shape[0]
@@ -155,7 +131,7 @@ def pseudo_gibbs(sampled_image, b_data, b_mask, encoder, decoder, p_z,  d, resul
 	##Evaluate --	
 	do_plot=True
 	if do_plot:
-		iwae_bound = eval_iwae_bound(sampled_image, full, b_mask, encoder ,decoder, p_z, d, K=1000, with_labels = with_labels)
+		iwae_bound = eval_iwae_bound(sampled_image, full, b_mask, encoder ,decoder, p_z, d, K=1000, with_labels = with_labels, data= data)
 		print("IWAE bound for pseudo-gibbs -- ", iwae_bound)
 
 	iwae_bound=0
@@ -419,7 +395,7 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 	interval = int(T/4)
 
 	zgivenx_evaluate = torch.zeros((T,d)).to(device,dtype = torch.float)
-	logqz_evaluate = torch.zeros((T,d)).to(device,dtype = torch.float)
+	logqz_evaluate = torch.zeros((T,1)).to(device,dtype = torch.float)
 
 	for t in range(T):
 
@@ -582,13 +558,12 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 
 	##Evaluate --
 	do_plot=True
-
 	if do_plot:
 		if with_labels:
 			iota_x[0,0,:,:].reshape(batch_size,1,p,q)[~mask] = x_prev
 		else:
 			iota_x[~mask] = x_prev
-		iwae_bound = eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1000, with_labels=with_labels)
+		iwae_bound = eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1000, with_labels=with_labels, data=data)
 		print("IWAE bound for metropolis within gibbs -- ", iwae_bound)
 
 	iwae_bound =0
@@ -596,7 +571,6 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 		return zgivenx_evaluate, logqz_evaluate
 	else:
 		return m_nelbo, m_error, xm_logits, m_loglikelihood, iwae_bound, x_prev
-
 
 def m_g_sampler_simple(iota_x, full, mask, encoder, decoder, p_z, d, K=1, T=1000):
 	K=1
@@ -826,7 +800,281 @@ def optimize_q_xm(num_epochs, xm_params, z_params, b_data, sampled_image_o, b_ma
 
 	return xm_loss, xm_mse, -iwae_loss
 
-def optimize_IAF(num_epochs, z_params, b_data, sampled_image_o, b_mask , b_full, p_z, encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', p_z_eval = None):
+
+def optimize_mixture_IAF(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', with_labels=False, labels = None, do_random=True):
+	i=-1
+	batch_size = b_data.shape[0]
+	channels = b_data.shape[1]
+	p = b_data.shape[2]
+	q = b_data.shape[3]
+
+	num_components = 10
+
+	b_data[~b_mask] = 0
+	r1 = -1
+	r2 = 1
+	#print(b_data.shape, type(b_data)) 
+
+	logits, means, scales = init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_size, d, r1, r2, data=data)
+	do_plot = True
+	logits = logits.to(device,dtype = torch.float)
+	means = means.to(device,dtype = torch.float)
+	scales = scales.to(device,dtype = torch.float)
+
+	autoregressive_nn =  AutoRegressiveNN(d, [320, 320]).cuda()
+	autoregressive_nn2 =  AutoRegressiveNN(d, [320, 320]).cuda()
+
+	#iaf_params = list()
+	#for i in range(10):
+	#	t1.append(AutoRegressiveNN(d, [320, 320]).cuda())
+	#	t2.append(AutoRegressiveNN(d, [320, 320]).cuda())
+		#print(t1[i].parameters())
+	#	iaf_params +=  list(t1[i].parameters()) + list(t2[i].parameters())
+	#optimizer_iaf = torch.optim.Adam(iaf_params, lr=0.01) #+ list([t1[i].parameters() for i in range(10)])
+	#print(td.MixtureSameFamily(td.Categorical(logits=logits), td.Independent(td.Normal(means.detach(), scales.exp().detach()), 1)).entropy())
+		
+	if do_plot:
+		comp_samples = np.zeros((num_components+2,50,d))
+		for comp in range(num_components):
+			probs = torch.zeros(batch_size, num_components)
+			probs[0,comp] = 1.0
+			dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means, scales.exp()), 1))
+			#print(dist.sample([50]).cpu().data.numpy(), dist.sample([50]).cpu().data.numpy().shape)
+			a = dist.sample([50])
+			comp_samples[comp] = a.cpu().data.numpy().reshape([50,d]) 
+			display_images(decoder, dist, d, results + str(i) + "/compiled/components/" + str(nb%10)  + str(iterations)  + '-component' + str(comp) + 'init-mixture.png', k = 50, data=data)
+
+		if data == 'mnist':
+			x_7 = get_sample_digit(data_dir = "data" , digit=7, file = results + str(i) + "/compiled/")
+			x_9 = get_sample_digit(data_dir = "data" , digit=9 ,file = results + str(i) + "/compiled/")
+			#x_7_embed = = encoder.forward(x_7.to(device,dtype = torch.float))
+			#x_
+			out_7 = encoder.forward(x_7.to(device,dtype = torch.float))
+			out_9 = encoder.forward(x_9.to(device,dtype = torch.float))
+			comp_samples[num_components] =  out_7[...,:d].cpu().data.numpy().reshape([50,d]) 
+			comp_samples[num_components+1] = out_9[...,:d].cpu().data.numpy().reshape([50,d]) 
+			print(get_pxgivenz(out_7,d, x_7.to(device,dtype = torch.float),decoder), get_pxgivenz(out_9,d, x_9.to(device,dtype = torch.float), decoder))
+
+		comp_samples = comp_samples.reshape(((num_components+2)*50,d))
+
+		X = TSNE(n_components=2, learning_rate='auto', init='random', perplexity=3).fit_transform(comp_samples)
+		scatter_plot_(X.reshape((num_components+2,50,2)), num_components, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'init-mixture-scatterplot.png')
+
+		print("entropy before------", get_entropy_mixture(logits))
+		print(td.Independent(td.Normal(means, scales.exp()), 1).entropy())
+
+	logits.requires_grad = True
+	means.requires_grad = True
+	scales.requires_grad = True
+
+	#test_optimizer = torch.optim.LBFGS([xm_params]) ##change, sgd, adagrad
+	test_optimizer = torch.optim.Adam([means,scales], lr=1.0, betas=(0.9, 0.999)) 
+	test_optimizer_logits = torch.optim.Adam([logits], lr=0.1, betas=(0.9, 0.999))  #1.0 for re-inits
+	optimizer_iaf = torch.optim.Adam(list(autoregressive_nn.parameters()) + list(autoregressive_nn2.parameters()), lr=0.01)
+
+	#lambda1 = lambda epoch: 0.67 ** epoch
+	lambda1 = lambda epoch: 0.95
+	#scheduler = torch.optim.lr_scheduler.LambdaLR(optimizers, lr_lambda=lambda1)
+	scheduler = torch.optim.lr_scheduler.StepLR(test_optimizer, step_size=30, gamma=0.5)
+	scheduler_logits = torch.optim.lr_scheduler.StepLR(test_optimizer_logits, step_size=30, gamma=0.5)
+	#scheduler = torch.optim.lr_scheduler.MultiplicativeLR(test_optimizer, lr_lambda=lambda1)
+	#scheduler_logits = torch.optim.lr_scheduler.MultiplicativeLR(test_optimizer_logits, lr_lambda=lambda1)
+
+	lrs = []
+
+	#test_optimizer = torch.optim.Adagrad([xm_params], lr=0.1) 
+	#b_data = b_data_init
+	#q_zgivenxobs = td.Independent(td.Normal(loc=z_params[...,:d],scale=torch.nn.Softplus()(z_params[...,d:])),1)
+
+	z_elbo = np.zeros((num_epochs))
+	z_mse = np.zeros((num_epochs))
+	z_loglikelihood = np.zeros((num_epochs))
+	z_loss= np.zeros((num_epochs))
+
+	a = int(num_epochs/4)
+	beta = 1
+
+	#do_random = True
+	do_plot = True
+
+	for k in range(num_epochs):
+		##Let the optimization find modes first
+		if not do_random and k==0:
+			logits.requires_grad = False
+
+		if do_random and k==99:
+			logits.requires_grad = False
+
+		##Adjust the weights of the modes in the mixture
+		if k==199:
+			logits.requires_grad = True
+
+		##Reset learning rate for means and scales
+		if do_random and k==99:
+			del test_optimizer, scheduler
+			test_optimizer = torch.optim.Adam([means,scales], lr=1.0, betas=(0.9, 0.999)) 
+			scheduler = torch.optim.lr_scheduler.StepLR(test_optimizer, step_size=30, gamma=0.5)
+
+		test_optimizer.zero_grad()
+		optimizer_iaf.zero_grad()
+		test_optimizer_logits.zero_grad()
+		loss, log_like, aa, bb, flow_dist = mixture_loss(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, means = means, scales = scales, logits = logits,  decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, beta=beta, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2)
+		loss.backward() 
+		test_optimizer.step()
+		test_optimizer_logits.step()
+
+		if not do_random and k>=199:
+			optimizer_iaf.step()
+
+		if do_random and k>=199:
+			optimizer_iaf.step()
+
+		lrs.append(test_optimizer.param_groups[0]["lr"])
+		scheduler.step()
+
+		if k>=199:
+			scheduler_logits.step()
+
+		#loss, log_like, aa, bb, z_params = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, z_params = z_params, xm_params = xm_params.to(device,dtype = torch.float), encoder = encoder, decoder = decoder , device = device, d=d, K=100, K_z=1)
+
+		z_loss[k] = loss.item()
+		#print("k :", k, loss.item())
+		#Impute 
+		if do_plot:
+			with torch.no_grad():
+				imputation = b_data.to(device,dtype = torch.float) 
+				q_z = ReparameterizedNormalMixture1d(logits.detach(), means.detach(), torch.nn.Softplus()(scales).detach())
+				zgivenx = q_z.sample([])
+				zgivenx_flat = zgivenx.reshape([1,d])
+				all_logits_obs_model = decoder.forward(zgivenx_flat)
+				if data=='mnist':
+					imputation[~b_mask] = torch.sigmoid(all_logits_obs_model)[~b_mask]
+				else:
+					imputation[~b_mask] = all_logits_obs_model[~b_mask]
+
+				#G/et error on imputation
+				img = imputation.cpu().data.numpy()
+				err = np.array([mse(img.reshape([1,channels,p,q]),b_full.cpu().data.numpy(),b_mask.cpu().data.numpy().astype(bool))])
+				z_mse[k] = err
+
+				if (k)%a==0 or k ==0:
+					if data=='mnist':
+						plot_image(np.squeeze(img),results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' + str(k) + "mixture.png")
+					else:
+						imputation[~b_mask] = all_logits_obs_model[~b_mask]
+						#print(all_logits_obs_model[~b_mask])
+						img = imputation.cpu().data.numpy()
+						plot_image_svhn(np.squeeze(img),results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' + str(k) + "mixture.png")
+
+		ap = False
+		if do_random and k%20==0 and k<=100: #
+			#print("k ---", k )
+			threshold = 0.01
+			probs = torch.softmax(logits.detach(),dim=1)
+			#print(probs)
+			ap = torch.any(probs<threshold)
+			#print(ap)
+			if ap:
+				b_data[~b_mask] = 0
+				logits_, means_, scales_ = init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_size, d, r1, r2, data=data, repeat=True)
+				logits_ = logits_.to(device,dtype = torch.float)
+				means_ = means_.to(device,dtype = torch.float)
+				scales_ = scales_.to(device,dtype = torch.float)
+				#logits = torch.where(probs > threshold, logits.detach(), logits_)
+
+		#For the first 100 iterations, re-init means 
+		if do_random and k%20==0 and k<=100 and ap:
+			means__ = means.detach()
+			scales__ = scales.detach()
+			logits = logits_
+			probs = torch.Tensor.repeat(probs.reshape(batch_size, num_components, 1),[1,1,d]) 
+			means = torch.where(probs >= threshold, means__, means_)
+			scales = torch.where(probs >= threshold, scales__, scales_)
+			#print(logits, logits_)
+			logits.requires_grad = True
+			means.requires_grad = True
+			scales.requires_grad = True
+
+			lr_ = test_optimizer.param_groups[0]["lr"]
+			del test_optimizer
+			test_optimizer = torch.optim.Adam([means,scales], lr=lr_, betas=(0.9, 0.999)) ##Ask Gabe about any alternative
+
+			lr_ = test_optimizer_logits.param_groups[0]["lr"]
+			del test_optimizer_logits 
+			test_optimizer_logits = torch.optim.Adam([logits], lr=0.1, betas=(0.9, 0.999)) ##Ask Gabe about any alternative
+
+	logits.requires_grad = False
+	means.requires_grad = False
+	scales.requires_grad = False
+
+	for params in autoregressive_nn.parameters():
+		params.requires_grad = False
+
+	for params in autoregressive_nn2.parameters():
+		params.requires_grad = False
+
+	iwae_loss = 0
+	iwae_loss, log_like, aa, bb, flow_dist = mixture_loss(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, means = means, scales = scales, logits = logits,  decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, beta=beta, evaluate=True, full= b_full.to(device,dtype = torch.float), iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2)
+
+	if do_plot:
+		iwae_loss, log_like, aa, bb, flow_dist = mixture_loss(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, means = means, scales = scales, logits = logits,  decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, beta=beta, evaluate=True, full= b_full.to(device,dtype = torch.float), iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2)
+
+
+	print("IWAE Loss for mixture", -iwae_loss)
+	#print("means after --", torch.sum(means,2))
+
+	do_plot=True
+
+	if do_plot:
+		comp_samples = np.zeros((num_components+2,50,d))
+		for comp in range(num_components):
+			probs = torch.zeros(batch_size, num_components)
+			probs[0,comp] = 1.0
+			dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means.detach(), scales.exp().detach()), 1))
+			transform = AffineAutoregressive(autoregressive_nn).cuda()
+			transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
+
+			pyro.module("my_transform", transform)  
+			flow_dist_ = pyro.distributions.torch.TransformedDistribution(q_z, [transform, transform2])
+			#print(dist.sample([50]).cpu().data.numpy(), dist.sample([50]).cpu().data.numpy().shape)
+			comp_samples[comp] = flow_dist_.sample([50]).cpu().data.numpy().reshape([50,d])
+			display_images(decoder, flow_dist_, d, results + str(i) + "/compiled/components/" + str(nb%10)  + str(iterations)  + '-component' + str(comp) + 'mixture.png', k = 50, data=data)
+		
+		if data== 'mnist':
+			comp_samples[num_components] =  out_7[...,:d].cpu().data.numpy().reshape([50,d]) 
+			comp_samples[num_components+1] = out_9[...,:d].cpu().data.numpy().reshape([50,d]) 
+
+		comp_samples = comp_samples.reshape([(num_components+2)*50,d])
+		X = TSNE(n_components=2, learning_rate='auto', init='random', perplexity=3).fit_transform(comp_samples)
+		scatter_plot_(X.reshape([num_components+2,50,2]), num_components, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'mixture-scatterplot.png')
+
+		print("entropy after------", get_entropy_mixture(logits))
+		print(td.Independent(td.Normal(means, scales.exp()), 1).entropy())
+		#print(td.MixtureSameFamily(td.Categorical(logits=logits), td.Independent(td.Normal(means.detach(), scales.exp().detach()), 1)).entropy())
+		#print(scales.exp())
+		if data=='mnist':
+			plot_image(np.squeeze(img),results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' + str(num_epochs) + "mixture.png")
+		else:
+			imputation = b_data.to(device,dtype = torch.float) 
+			imputation[~b_mask] = all_logits_obs_model[~b_mask]
+			img = imputation.cpu().data.numpy()
+			plot_image_svhn(np.squeeze(img),results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' + str(num_epochs) + "mixture.png")
+
+		prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
+		plot_images_in_row(num_epochs, loc1 =  prefix +str(0) + "mixture.png", loc2 =  prefix +str(a) + "mixture.png", loc3 =  prefix +str(2*a) + "mixture.png", loc4 =  prefix +str(3*a) + "mixture.png", loc5 =  prefix +str(4*a) + "mixture.png", file =  prefix + "mixture-all.png", data=data) 
+
+	q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
+
+	if data=='mnist':
+		display_images(decoder, flow_dist, d, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + str(do_random) + 'mixture-IAF.png', k = 50, b_data = b_data, b_mask=b_mask)
+	else:
+		display_images_svhn(decoder, flow_dist, d, results  + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'mixture-IAF.png', k = 50)
+
+	del test_optimizer, test_optimizer_logits, scheduler, scheduler_logits
+	return z_loss, z_mse, -iwae_loss, logits, means, scales, autoregressive_nn, autoregressive_nn2
+
+
+def optimize_IAF(num_epochs, z_params, b_data,  b_mask , b_full, p_z, encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', sampled_image_o =None, p_z_eval = None, with_gaussian=False, with_labels=False, with_mixture=False, return_imputation=False):
 
 	autoregressive_nn =  AutoRegressiveNN(d, [320, 320]).cuda()
 	autoregressive_nn2 =  AutoRegressiveNN(d, [320, 320]).cuda()
@@ -838,17 +1086,20 @@ def optimize_IAF(num_epochs, z_params, b_data, sampled_image_o, b_mask , b_full,
 	p = b_data.shape[2]
 	q = b_data.shape[3]
 
+	z_params =  encoder.forward(b_data.to(device,dtype = torch.float))
+
+	i=-1
+
+	z_params = z_params.to(device)
+	if with_gaussian:
+		z_params.requires_grad = True
+		test_optimizer_z = torch.optim.Adam([z_params], lr=0.1, betas=(0.9, 0.999)) #0.1
+
 	if data=='svhn':
 		sigma_decoder = decoder.get_parameter("log_sigma")
 
 	optimizer_iaf = torch.optim.Adam(list(autoregressive_nn.parameters()) + list(autoregressive_nn2.parameters()), lr=0.01)
-	#scheduler = torch.optim.lr_scheduler.StepLR(optimizer_iaf, step_size=30, gamma=0.1)
-
-	#optimizer_iaf = torch.optim.Adam(list(autoregressive_nn.parameters()), lr=0.01)
-
-	z_params = z_params.cuda()
-	#num_epochs_z = 600
-
+	
 	z_elbo = np.zeros((num_epochs))
 	z_mse = np.zeros((num_epochs))
 	z_loglikelihood = np.zeros((num_epochs))
@@ -860,19 +1111,26 @@ def optimize_IAF(num_epochs, z_params, b_data, sampled_image_o, b_mask , b_full,
 	do_plot = False
 	for k in range(num_epochs):       
 		#print("In IAF----")  
+
 		loss, log_like, aa, bb, flow_dist = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, z_params = z_params, encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2)
 
 		#z_kl_loss[iterations, nb%10, k] = bb.item()
 		#z_loglike_loss[iterations, nb%10, k] = aa.item()
+		if with_gaussian:
+			test_optimizer_z.zero_grad()
 		optimizer_iaf.zero_grad()
 		loss.backward() 
 		#print(list(autoregressive_nn.parameters()))
 		#print(loss.item())
 		optimizer_iaf.step()
+		if with_gaussian:
+			test_optimizer_z.step()
+			#print(k, loss.item(), z_params)
 		#scheduler.step()
 		#loss, log_like, aa, bb, z_params = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, z_params = z_params, xm_params = xm_params.to(device,dtype = torch.float), encoder = encoder, decoder = decoder , device = device, d=d, K=100, K_z=1)
 
 		z_loss[k] = loss.item()
+
 		imputation = b_data.to(device,dtype = torch.float) 
 
 		if do_plot:
@@ -902,6 +1160,9 @@ def optimize_IAF(num_epochs, z_params, b_data, sampled_image_o, b_mask , b_full,
 	for params in autoregressive_nn2.parameters():
 		params.requires_grad = False
 
+	if with_gaussian:
+		z_params.requires_grad = False
+
 	iwae_loss = 0
 	iwae_loss, log_like, aa, bb, flow_dist = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z_eval, z_params = z_params,  encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2, evaluate=True,full= b_full.to(device,dtype = torch.float))
 
@@ -918,11 +1179,16 @@ def optimize_IAF(num_epochs, z_params, b_data, sampled_image_o, b_mask , b_full,
 		plot_images_in_row(num_epochs, loc1 =  prefix +str(0) + "iafz.png", loc2 =  prefix +str(a) + "iafz.png", loc3 =  prefix +str(2*a) + "iafz.png", loc4 =  prefix +str(3*a) + "iafz.png", loc5 =  prefix +str(4*a) + "iafz.png", file =  prefix + "iaf-all.png", data = 'data') 
 
 		if data=='mnist':
-			display_images(decoder, flow_dist, d, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'iafz.png', k = 50)
+			display_images(decoder, flow_dist, d, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + str(with_gaussian) + 'iafz.png', k = 50)
 		else:
 			display_images_svhn(decoder, flow_dist, d, results  + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'iafz.png', k = 50)
 
-	return z_loss, z_mse,  -iwae_loss, autoregressive_nn, autoregressive_nn2
+	if return_imputation: 
+		z_loss, z_mse,  -iwae_loss, autoregressive_nn, autoregressive_nn2, img
+	elif with_gaussian:
+		return z_loss, z_mse,  -iwae_loss, autoregressive_nn, autoregressive_nn2, z_params
+	else:
+		return z_loss, z_mse,  -iwae_loss, autoregressive_nn, autoregressive_nn2
 
 
 def optimize_IAF_with_labels(num_epochs, p_z, p_y, b_data, b_full, b_mask , encoder, decoder, discriminative_model, device, d, results, iterations, nb, K_samples, data='mnist'):
@@ -1041,7 +1307,7 @@ def optimize_IAF_with_labels(num_epochs, p_z, p_y, b_data, b_full, b_mask , enco
 
 
 
-def optimize_z(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', p_z_eval=None):
+def optimize_z(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', p_z_eval=None, return_imputation=False):
 	if iterations==-1:
 		z_params =  encoder.forward(b_full.to(device,dtype = torch.float))
 	else:
@@ -1114,7 +1380,7 @@ def optimize_z(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, devic
 
 	z_params.requires_grad = False
 	iwae_loss=0
-	
+
 	do_plot=True
 	if do_plot:
 		iwae_loss, log_like, aa, bb, z_params = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z_eval, z_params = z_params, encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, evaluate=True, full= b_full.to(device,dtype = torch.float))
@@ -1137,7 +1403,10 @@ def optimize_z(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, devic
 		else:
 			display_images_svhn(decoder, q_zgivenxobs, d, results  + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + '.png', k = 50)
 
-	return z_loss, z_mse, -iwae_loss, z_params
+	if return_imputation:
+		return z_loss, z_mse, -iwae_loss, z_params, img
+	else:
+		return z_loss, z_mse, -iwae_loss, z_params
 
 
 def optimize_z_with_labels(num_epochs, p_z, p_y, b_data, b_full, b_mask , encoder, decoder, discriminative_model, device, d, results, iterations, nb, K_samples, data='mnist'):
@@ -1263,7 +1532,7 @@ def get_pxgivenz(out_encoder, d, data, decoder):
 
 	return torch.mean(logpxobsgivenz)
 
-def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', with_labels=False, labels = None, do_random=True):
+def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', with_labels=False, labels = None, do_random=True, return_imputation=False):
 
 	i=-1
 	batch_size = b_data.shape[0]
@@ -1319,7 +1588,6 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 	logits.requires_grad = True
 	means.requires_grad = True
 	scales.requires_grad = True
-
 	
 	#test_optimizer = torch.optim.LBFGS([xm_params]) ##change, sgd, adagrad
 	test_optimizer = torch.optim.Adam([means,scales], lr=1.0, betas=(0.9, 0.999)) 
@@ -1391,7 +1659,7 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 		if do_plot:
 			with torch.no_grad():
 				imputation = b_data.to(device,dtype = torch.float) 
-				q_z = ReparameterizedNormalMixture1d(logits.detach(), means.detach(), scales.exp().detach())
+				q_z = ReparameterizedNormalMixture1d(logits.detach(), means.detach(),torch.nn.Softplus()(scales))
 				zgivenx = q_z.sample([])
 				zgivenx_flat = zgivenx.reshape([1,d])
 				all_logits_obs_model = decoder.forward(zgivenx_flat)
@@ -1454,10 +1722,10 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 	logits.requires_grad = False
 	means.requires_grad = False
 	scales.requires_grad = False
-	plt.plot(range(num_epochs),lrs)
-	plt.show()
-	plt.savefig(results + str(i) + "/compiled/components/" + str(nb%10)  + str(iterations)  + 'lr.png')
-	plt.close()
+	#plt.plot(range(num_epochs),lrs)
+	#plt.show()
+	#plt.savefig(results + str(i) + "/compiled/components/" + str(nb%10)  + str(iterations)  + 'lr.png')
+	#plt.close()
 
 	iwae_loss = 0
 	iwae_loss, log_like, aa, bb = mixture_loss(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, means = means, scales = scales, logits = logits,  decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, beta=beta, evaluate=True, full= b_full.to(device,dtype = torch.float))
@@ -1503,13 +1771,19 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 		prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
 		plot_images_in_row(num_epochs, loc1 =  prefix +str(0) + "mixture.png", loc2 =  prefix +str(a) + "mixture.png", loc3 =  prefix +str(2*a) + "mixture.png", loc4 =  prefix +str(3*a) + "mixture.png", loc5 =  prefix +str(4*a) + "mixture.png", file =  prefix + "mixture-all.png", data=data) 
 
+		q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
+
 		if data=='mnist':
 			display_images(decoder, q_z, d, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'mixture.png', k = 50, b_data = b_data, b_mask=b_mask)
 		else:
-			display_images_svhn(decoder, q_z, d, results  + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'mixture.png', k = 50)
+			display_images_svhn(decoder, q_z, d, results  + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + str(do_random) +'mixture.png', k = 50)
 
 	del test_optimizer, test_optimizer_logits, scheduler, scheduler_logits, comp_samples
-	return z_loss, z_mse, -iwae_loss, logits, means, scales
+
+	if return_imputation: 
+		return z_loss, z_mse, -iwae_loss, logits, means, scales
+	else:
+		return z_loss, z_mse, -iwae_loss, logits, means, scales
 
 
 def optimize_mixture_labels(num_epochs, p_z,  p_y, b_data, b_full, b_mask, encoder, decoder, discriminative_model, device, d, results, iterations, nb, K_samples, data='mnist', labels = None, do_random=False):
