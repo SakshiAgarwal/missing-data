@@ -6,10 +6,10 @@ from sklearn.manifold import TSNE
 import pickle
 
 
-def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data='mnist', with_labels=False):
+def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data_='mnist', with_labels=False):
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-	if data=='mnist':
+	if data_=='mnist':
 		embeddings = np.zeros((60000, 2*d))
 	else :
 		embeddings = np.zeros((73257, 2*d))
@@ -21,7 +21,7 @@ def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_s
 	#embeddings = []
 	print(batch_size)
 	for data in train_loader:
-		if data=='mnist':
+		if data_=='mnist':
 			b_data, b_mask, b_full, labels_one_hot  = data
 			#labels = torch.argmax(labels_one_hot, dim=1).item()
 			b_full = b_full.to(device,dtype = torch.float)

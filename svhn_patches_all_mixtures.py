@@ -1,13 +1,13 @@
 import os
 from numba import cuda
-cuda.select_device(3)
+cuda.select_device(2)
 print(cuda.current_context().get_memory_info())
 #os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 #os.environ["NVIDIA_VISIBLE_DEVICES"] = "2"
-os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '2'
 import torch
-torch.cuda.set_device(3)
+torch.cuda.set_device(2)
 print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -99,12 +99,14 @@ if num_epochs>0:
     encoder, decoder = train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH)
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:2')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH)
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:2')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 print(torch.cuda.current_device())
 print("model loaded")
+
+print(torch.cuda.current_device())
 
 file_save = results + str(-1) + "/gmms_svhn.pkl"
 

@@ -2,16 +2,59 @@ import torch
 import numpy as np
 from loss import *
 import gc
+from torch.nn import functional as F
+import torch.nn as nn
+
+
+def weights_init(layer):
+  if type(layer) == nn.Linear: torch.nn.init.orthogonal_(layer.weight)
+   
+
+def train_VAE_uci(num_epochs, trainset, validset, ENCODER_PATH,  results, encoder, decoder, log_sigma, optimizer, p_z, device, d, DECODER_PATH=None):
+	encoder.apply(weights_init)
+	decoder.apply(weights_init)
+	n = len(trainset)
+	p = trainset.shape[1]
+
+	bs=64
+	K=1
+	print("trainset size: ", n,p)
+	mask = np.ones((n,p))
+	
+	for epoch in range(num_epochs):
+		train_loss = 0
+		train_log_likelihood = 0
+		nb = 0
+		train_mse = 0
+
+		perm = np.random.permutation(n)
+		batches_data = np.array_split(trainset[perm,], n/bs)
+		batches_mask = np.array_split(mask[perm,], n/bs)
+
+		for it in range(len(batches_data)):
+			print(log_sigma)
+			optimizer.zero_grad()
+			encoder.zero_grad()
+			decoder.zero_grad()
+			b_data = torch.from_numpy(batches_data[it]).float().cuda()
+			b_mask = torch.from_numpy(batches_mask[it]).float().cuda()
+			loss = miwae_loss(b_data,b_mask, encoder, decoder, log_sigma, d, K, p_z)
+			loss.backward()
+			optimizer.step()
+
+
+	torch.save({'model_state_dict': encoder.state_dict()}, ENCODER_PATH)
+	if DECODER_PATH is not None:
+		torch.save({'model_state_dict': decoder.state_dict()}, DECODER_PATH)
+
+	return encoder, decoder
+
+
 
 def train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH,  results, encoder, decoder, optimizer, p_z, device, d, stop_early, with_labels=False, DECODER_PATH=None):
 	print("Training ---")
-	print(torch.cuda.memory_allocated(device=3))
-
 	torch.cuda.empty_cache()
-	print(torch.cuda.memory_allocated(device=3))
-
 	for epoch in range(num_epochs):
-		print(torch.cuda.memory_allocated(device=3))
 		train_loss = 0
 		train_log_likelihood = 0
 		nb = 0
@@ -104,23 +147,18 @@ def train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH,  results, enco
 		#f.write(str((val_log_likelihood/(batch_size*28*28))) + " \t " + str(val_log_likelihood) + "\n")
 
 	print("Memory allocated after training ---")
-	print(torch.cuda.memory_allocated(device=3))
 	torch.cuda.empty_cache()
-	print(torch.cuda.memory_allocated(device=3))
 
 	return encoder, decoder
 
 def train_pygivenx(num_epochs, train_loader, val_loader, ENCODER_PATH, results, encoder, optimizer, device, d, stop_early):
 	print("Training ---")
 
-	print(torch.cuda.memory_allocated(device=3))
 	torch.cuda.empty_cache()
-	print(torch.cuda.memory_allocated(device=3))
 
 	CEloss = torch.nn.CrossEntropyLoss()
 
 	for epoch in range(num_epochs):
-		print(torch.cuda.memory_allocated(device=3))
 		train_loss = 0
 		train_log_likelihood = 0
 		nb = 0
@@ -190,22 +228,17 @@ def train_pygivenx(num_epochs, train_loader, val_loader, ENCODER_PATH, results, 
 			torch.save({'model_state_dict': encoder.state_dict()}, ENCODER_PATH)
 
 	print("Memory allocated after training ---")
-	print(torch.cuda.memory_allocated(device=3))
 	torch.cuda.empty_cache()
-	print(torch.cuda.memory_allocated(device=3))
 
 	return encoder
 
 
 def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early):
 	print("Training ---")
-	print(torch.cuda.memory_allocated(device=3))
 
 	torch.cuda.empty_cache()
-	print(torch.cuda.memory_allocated(device=3))
 
 	for epoch in range(num_epochs):
-		print(torch.cuda.memory_allocated(device=3))
 		train_loss = 0
 		train_log_likelihood = 0
 		nb = 0
@@ -292,9 +325,7 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 			f.write(str((val_log_likelihood/(batch_size*32*32))) + " \t " + str(val_log_likelihood) + "\n")
 
 	print("Memory allocated after training ---")
-	print(torch.cuda.memory_allocated(device=3))
 	torch.cuda.empty_cache()
-	print(torch.cuda.memory_allocated(device=3))
 
 	return encoder, decoder
 

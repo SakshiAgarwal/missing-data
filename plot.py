@@ -205,7 +205,6 @@ def plot_image(img, file='true.png', missing_pattern_x = None, missing_pattern_y
 	plt.savefig(file)
 	plt.close()
 
-
 def plot_image_svhn(img, file='true.png', missing_pattern_x = None, missing_pattern_y = None):
 
 	#plt.subplot(121)
@@ -492,28 +491,29 @@ def compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_
 	x__ = np.arange(10)
 	ys = [i+x__+(i*x__)**2 for i in range(10)]
 	colours = cm.rainbow(np.linspace(0, 1, len(ys)))
+
 	fig = plt.figure(1)
 	ax = fig.add_subplot(111)
-
 	ms = 12
-	ax.plot(x, lower_bound, color=colours[0], label="0's", markersize=ms)
-	ax.plot(x, upper_bound, color=colours[1], label="True", markersize=ms)
-	ax.plot(x, bound_updated_encoder, color=colours[2], label="0's + tuned encoder (train)", markersize=ms)
-	ax.plot(x, bound_updated_test_encoder, color=colours[3], label="0's + tuned encoder (test)", markersize=ms)
+	ax.plot(x, lower_bound, color='red', label="0's")
+	ax.plot(x, upper_bound, color="green", label="True")
+	ax.plot(x, bound_updated_encoder, color='orange',linestyle='--', label="0's + tuned encoder (train)")
+	ax.plot(x, bound_updated_test_encoder, color=colours[0], label="0's + tuned encoder (test)")
 
-	ax.plot(x, pseudo_gibbs_iwae, color=colours[8], label="Pseudo Gibbs", markersize=ms)
-	ax.plot(x, metropolis_within_gibbs_iwae, color=colours[9], label="Metropolis Within Gibbs", markersize=ms)
+	ax.plot(x, pseudo_gibbs_iwae, color="pink", linestyle='--', label="Pseudo Gibbs")
+	ax.plot(x, metropolis_within_gibbs_iwae, color="purple", label="Metropolis Within Gibbs")
 
-	ax.plot(x, loss1, color=colours[4], label="Gaussian", markersize=ms)
-	ax.plot(x, loss2, color=colours[5], label="IAF", markersize=ms)
-	ax.plot(x, loss3, color=colours[6], label="Mixture", markersize=ms)
-	ax.plot(x, loss4, color=colours[7], label="Mixture (re-inits)", markersize=ms)
+	ax.plot(x, loss1, color="yellow", label="Gaussian")
+	ax.plot(x, loss2, color="brown", label="IAF")
+	ax.plot(x, loss3, color="blue", linestyle='--',  label="Mixture")
+	ax.plot(x, loss4, color="olive", label="Mixture (re-inits)")
 	
 	#ax.xlabel()
 	#ax.ylabel() 
 
 	if ylim1 is not None:
-		ax.ylim(ylim1, ylim2)
+		ax.axis(ymin=ylim1,ymax=ylim2)
+		#ax.ylim(ylim1, ylim2)
 
 	#plt.ylim(top=0)
 	#lgd = ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
@@ -628,9 +628,6 @@ def plot_images_comparing_methods(images, file, data='mnist'):
 	plt.show()
 	plt.savefig(file)
 	plt.close()
-
-
-
 
 def plot_labels_in_row(images, logqy,  file, data='mnist'):
 

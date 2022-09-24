@@ -4,8 +4,6 @@ cuda.select_device(3)
 print(cuda.current_context().get_memory_info())
 os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
 import torch
-torch.cuda.set_device(3)
-print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,24 +29,28 @@ from pyro.nn import AutoRegressiveNN
 from gmms import *
 import pickle
 from evaluate_helper import *
-
 results=os.getcwd() + "/results/mnist-False-"
 binary_data=False
 ENCODER_PATH = "models/e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
 DECODER_PATH = "models/d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
-ENCODER_PATH_UPDATED = "models/e_model_"+ str(binary_data) + "updated.pt" 
-ENCODER_PATH_UPDATED_Test = "models/e_model_"+ str(binary_data) + "updated_test.pt" 
+ENCODER_PATH_UPDATED = "models/e_model_"+ str(binary_data) + "top_half-updated.pt" 
+ENCODER_PATH_UPDATED_Test = "models/e_model_"+ str(binary_data) + "top_half-updated-test.pt" 
+print(torch.cuda.current_device())
+
 channels = 1    #1 for MNist
 p = 28          # 28 for mnist
 q = 28
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 d = 50
+print(torch.cuda.current_device())
 
 #print(device)
+
 encoder =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
 decoder = FlatWideResNetUpscaling(channels=channels, size=1, levels=3, blocks_per_level=2, in_features = d, shape=(p,q))
 encoder_updated =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
 encoder_updated_test =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
+print(torch.cuda.current_device())
 
 encoder = encoder.cuda()
 decoder = decoder.cuda()
@@ -78,6 +80,8 @@ for params in encoder_updated_test.parameters():
 for params in decoder.parameters():
     params.requires_grad = False
 
+print("here1",torch.cuda.current_device())
+
 ##Load parameters --
 g_prior = True
 read_only = False #if we would only read from saved evaluations
@@ -85,16 +89,19 @@ write_only = True
 to_plot = False
 max_samples = 2000
 if g_prior:
-	file_save_params = results + str(-1) + "/pickled_files/params_mnist.pkl"
+	file_save_params = results + str(-1) + "/pickled_files/TH-params_mnist.pkl"
+	with open(file_save_params, 'rb') as file:
+		[pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params, nb] = pickle.load(file)
+		#cuda.select_device(0)
+		#parameters = pickle.load(file)
 else:
-	file_save_params = results + str(-1) + "/pickled_files/mixture_params_mnist.pkl"
-	
-
-with open(file_save_params, 'rb') as file:
-	[pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb] = pickle.load(file)
+	file_save_params = results + str(-1) + "/pickled_files/TH-mixture_params_mnist.pkl"
+	with open(file_save_params, 'rb') as file:
+		print("here1",torch.cuda.current_device())
+		[pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params, nb] = pickle.load(file)
 
 if read_only:
-	with open(results + str(-1) + "/pickled_files/infered_iwae_p_gaussian.pkl", 'rb') as file:
+	with open(results + str(-1) + "/pickled_files/infereed_iwae_p_gaussian.pkl", 'rb') as file:
 		[lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae, nb] = pickle.load(file)
 	x = np.arange(max_samples)
 	colours = ['g', 'b', 'y', 'r', 'k', 'c']
@@ -103,7 +110,7 @@ if read_only:
 	exit()
 
 
-test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=1)
+test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, top_half=True),batch_size=1)
 #x = np.arange(max_samples)
 #print(x)
 z_iwae = np.zeros((max_samples))
@@ -120,7 +127,7 @@ metropolis_within_gibbs_iwae = np.zeros((max_samples))
 
 
 if g_prior:
-	p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+	p_z = td.Independent(td.Normal(loc=torch.zeros(d).to(device,dtype = torch.float),scale=torch.ones(d).to(device,dtype = torch.float)),1)
 else:
 	file_save = results + str(-1) + "/gmms.pkl"
 	with open(file_save, 'rb') as file:
@@ -142,8 +149,18 @@ for data in test_loader:
 	if to_plot:
 		if i< 20:
 			continue
+
+	#pseudo_gibbs_sample = parameters[i-1][0]
+	#metropolis_gibbs_sample = parameters[i-1][1]
+	#z_params = parameters[i-1][2]
+	#iaf_params = parameters[i-1][3]
+	#mixture_params_inits = parameters[i-1][4]
+	#mixture_params = parameters[i-1][5]
+	#nb = parameters[i-1][-1]
+
 	b_data, b_mask, b_full, labels = data
 
+	#print(z_params.shape)
 	#images.append(np.squeeze(b_full))
 	#images.append(np.squeeze(b_data))
 
@@ -159,23 +176,23 @@ for data in test_loader:
 	bound_updated_encoder += updated_encoder
 	#images.append(img)
 
-	updated_test_encoder  = eval_baseline(max_samples, p_z, encoder_updated_test, decoder, b_data.to(device,dtype = torch.float), b_full.to(device,dtype = torch.float), b_mask.to(device,dtype = torch.bool), d)
+	updated_test_encoder = eval_baseline(max_samples, p_z, encoder_updated_test, decoder, b_data.to(device,dtype = torch.float), b_full.to(device,dtype = torch.float), b_mask.to(device,dtype = torch.bool), d)
 	bound_updated_test_encoder += updated_test_encoder
 	#images.append(img)
 
 	pseudo_gibbs_ = evaluate_pseudo_gibbs(max_samples, p_z, encoder, decoder, pseudo_gibbs_sample[i-1].to(device,dtype = torch.float), b_data.to(device,dtype = torch.float),  b_full.to(device,dtype = torch.float), b_mask.to(device,dtype = torch.bool), d, device)
 	pseudo_gibbs_iwae += pseudo_gibbs_
+	
 	#images.append(img)
-
 	metropolis_within_gibbs_ = evaluate_metropolis_within_gibbs(max_samples, p_z, encoder, decoder, metropolis_gibbs_sample[i-1].to(device,dtype = torch.float), b_data.to(device,dtype = torch.float),  b_full.to(device,dtype = torch.float), b_mask.to(device,dtype = torch.bool), d, device)
 	metropolis_within_gibbs_iwae += metropolis_within_gibbs_
 	#images.append(img)
 
-	z_ = evaluate_z(p_z = p_z, b_data = b_data.to(device,dtype = torch.float),  b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),z_params = z_params[i-1], decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
+	z_ = evaluate_z(p_z = p_z, b_data = b_data.to(device,dtype = torch.float),  b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),z_params = z_params[i-1].to(device,dtype = torch.float), decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
 	z_iwae += z_
 	#images.append(img)
 
-	iaf_= evaluate_iaf(p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),iaf_params = iaf_params[i-1], encoder = encoder, decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
+	iaf_ = evaluate_iaf(p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),iaf_params = iaf_params[i-1], encoder = encoder, decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
 	iaf_iwae += iaf_
 	#images.append(img)
 
@@ -187,6 +204,8 @@ for data in test_loader:
 	mixture_inits_iwae += mixture_inits_
 	#images.append(img)	
 
+	#print(lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i)
+	#print(iaf_iwae[1], mixture_inits_iwae[-1] )
 	if to_plot:
 		if g_prior:
 			plot_images_comparing_methods(images, file=results + str(-1) + "/compiled/"+ str(i)+"most_probable_imputations.png")
@@ -203,14 +222,14 @@ for data in test_loader:
 			colours = ['g', 'b', 'y', 'r', 'k', 'c']
 
 			if g_prior:
-				compare_iwae(lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i,  colours, x, "IWAE", results + str(-1) + "/compiled/IWAEvsSamples.png", ylim1= None, ylim2 = None)
+				compare_iwae(lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i,  colours, x, "IWAE", results + str(-1) + "/compiled/TH-IWAEvsSamples.png") #, ylim1= lower_bound[1] - 10, ylim2 = upper_bound[-1]+10
 			else:
-				compare_iwae(lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i,  colours, x, "IWAE", results + str(-1) + "/compiled/IWAEvsSamples_mixture.png", ylim1= 0, ylim2 = 500)
+				compare_iwae(lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i,  colours, x, "IWAE", results + str(-1) + "/compiled/TH-IWAEvsSamples_mixture.png", ylim1= 500, ylim2= 1000) #ylim1= iaf_iwae[1] - 30, ylim2 = mixture_inits_iwae[-1] + 50
 
 			if g_prior:
-				file_save_params = results + str(-1) + "/pickled_files/infered_iwae_p_gaussian.pkl"
+				file_save_params = results + str(-1) + "/pickled_files/TH_mnist_iwae_p_gaussian.pkl"
 			else:
-				file_save_params = results + str(-1) + "/pickled_files/infereed_iwae_p_mixture.pkl"
+				file_save_params = results + str(-1) + "/pickled_files/TH_mnist_iwae_p_mixture.pkl"
 
 			with open(file_save_params, 'wb') as file:
 				pickle.dump([lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i, nb], file)

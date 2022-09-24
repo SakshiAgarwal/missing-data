@@ -114,6 +114,11 @@ encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
 
+encoder.eval()
+decoder.eval()
+encoder_updated.eval()
+encoder_updated_test.eval()
+
 print(torch.cuda.current_device())
 print("model loaded")
 
@@ -244,11 +249,12 @@ for K_samples in K_samples_ :
             mixture_params = []
 
             for data in test_loader:
-                #if nb<20:
-                #continue
-                #if nb==30:
+                nb +=1
+                #if nb<21:
+                #    continue
+                #if nb>=22:
                 #    break
-                if nb == num_images_to_run:
+                if nb == num_images_to_run + 1:
                     break
                     
                 print("Image : ", nb)
@@ -262,20 +268,21 @@ for K_samples in K_samples_ :
                 random = False
 
                 img = b_full.cpu().data.numpy()         ## added .data
-                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
+                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
 
                 missing = b_data
                 missing[~b_mask] = 0.5      
                 img = missing.cpu().data.numpy() 
-                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
+                
+                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
 
                 #lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
-                #upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
+                upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
                 #bound_updated_encoder += eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder_updated,decoder = decoder, p_z= p_z, d=d, K=K_samples)
                 #bound_updated_test_encoder += eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder_updated_test,decoder = decoder, p_z= p_z, d=d, K=K_samples)
 
                 #print("Lower IWAE bound (0's) : ", lower_bound)
-                #print("Upper IWAE bound (true image) : ", upper_bound)
+                print("Upper IWAE bound (true image) : ", upper_bound)
                 #print("Bound with re-tuned encoder on training dataset : ", bound_updated_encoder)
                 #print("Bound with re-tuned encoder on test dataset : ", bound_updated_test_encoder)
 
@@ -339,7 +346,7 @@ for K_samples in K_samples_ :
                 #Impute image with pseudo-gibbs
                 pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
                 pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
-                plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
+                #plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/compiled/" + str(nb%10) + str(iterations) + '-' + "pseudo-gibbs.png" )
 
                 ##M-with-gibbs sampler
                 start_m = datetime.now()
@@ -358,7 +365,7 @@ for K_samples in K_samples_ :
                 #Impute image with metropolis-within-pseudo-gibbs
                 metropolis_image = b_data.to(device,dtype = torch.float)
                 metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
-                plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
+                #plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/compiled/" + str(nb%10) +  str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
 
                 if dd:
                     if iterations==-1:
@@ -416,9 +423,9 @@ for K_samples in K_samples_ :
                 print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())
 
                 #print(t1.state_dict())
-                print("a")
+                #print("a")
                 iaf_params.append([t1.state_dict(), t2.state_dict()])
-                print("b")
+                #print("b")
                 #print(t1.state_dict())
                 iaf_iwae += iwae
                 iaf_loss += xm_nelbo_
@@ -465,6 +472,7 @@ for K_samples in K_samples_ :
                 #mixture_mse[iterations, nb%10, : ] += z_error_
                 mixture_params.append([logits, means, scales])
 
+                #exit()
                 #mixture_loss_samples[nb%10, iterations, samples_iter] = z_nelbo_[-1]
 
                 prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
@@ -473,15 +481,15 @@ for K_samples in K_samples_ :
                 gc.collect()
 
                 #print(lower_bound, upper_bound, bound_updated_encoder, pseudo_iwae, m_iwae,  xm_iwae,  xm_NN_iwae,  iaf_iwae, z_iwae, mixture_iwae_inits, mixture_iwae)
-                nb += 1
+                #nb += 1
                 print(lower_bound/nb, upper_bound/nb, bound_updated_encoder/nb, pseudo_iwae/nb, m_iwae/nb,  xm_iwae/nb,  xm_NN_iwae/nb,  iaf_iwae/nb, z_iwae/nb, mixture_iwae/nb, mixture_iwae_inits/nb) #added mixture_iwae_inits later
 
-                file_save_params = results + str(-1) + "/pickled_files/mixture_params_mnist.pkl"
+                file_save_params = results + str(-1) + "/pickled_files/params_mnist_mixture_patches.pkl"
 
                 with open(file_save_params, 'wb') as file:
                     pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
 
-                file_loss = results + str(-1) + "/pickled_files/mixture_loss.pkl"
+                file_loss = results + str(-1) + "/pickled_files/loss_mnist_patches.pkl"
                 with open(file_loss, 'wb') as file:
                     pickle.dump([xm_loss,xm_loss_NN,z_loss,iaf_loss,mixture_loss_inits,mixture_loss,nb], file)
 

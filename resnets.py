@@ -486,7 +486,6 @@ class FlatWideResNet(nn.Module):
         x = self.output_layer(x)
         return x.float()
 
-
 @RegisterNetwork('wrn_upscale', encoder='wrn_inverse', decoder='wrn')
 class FlatWideResNetUpscaling(nn.Module):
     def __init__(self, channels, shape=(32, 32), in_features=None, size=2, levels=4, blocks_per_level=4, kernel_size=3,

@@ -52,6 +52,7 @@ num_epochs_test = 300
 ##results for beta-annealing
 #results=os.getcwd() + "/results/mnist-" + str(binary_data) + "-beta-annealing-"
 ##Results for alpha-annealing
+
 results=os.getcwd() + "/results/svhn/" 
 ENCODER_PATH = "models/svhn_e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
 DECODER_PATH = "models/svhn_d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
@@ -107,6 +108,8 @@ decoder.load_state_dict(checkpoint['model_state_dict'])
 print(torch.cuda.current_device())
 print("model loaded")
 
+print(decoder.get_parameter("log_sigma"))
+
 file_save = results + str(-1) + "/gmms_svhn.pkl"
 
 if os.path.exists(file_save):
@@ -126,11 +129,18 @@ burn_in_period = 20
 mixture_loss = np.zeros((6,10,num_epochs_test))
 mixture_mse = np.zeros((6,10,num_epochs_test))
 
-###Generate 500 samples from decoder
-#for i in range(500):
-#    x = generate_samples(p_z, decoder, d, L=1).cpu().data.numpy().reshape(1,1,28,28)  
-#    plot_image(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
 
+decoder.eval()
+print(decoder.training)
+
+###Generate 500 samples from decoder
+for i in range(10):
+    x = generate_samples(p_z, decoder, d, L=1, data='svhn').cpu().data.numpy().reshape(1,3,32,32)  
+    plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
+
+
+
+exit()
 #xm_loss = np.zeros((6,10,num_epochs_test))
 #xm_loss_per_img = np.zeros((6,10,num_epochs_test))
 #xm_mse_per_img = np.zeros((6,10,num_epochs_test))
@@ -247,19 +257,20 @@ for iterations in range(1):
             random = False
 
             img = b_full.cpu().data.numpy()         ## added .data
-            plot_image_svhn(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
+            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" +  "true-debug.png")
 
             missing = b_data
             missing[~b_mask] = 0.5      
             img = missing.cpu().data.numpy() 
-            plot_image_svhn(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
+            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" +  "missing-debug.png" )
+            lower_bound +=  eval_iwae_bound_debug(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn', results=results)
 
-            lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
-            upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
+            upper_bound +=  eval_iwae_bound_debug(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn', results=results)
+
 
             print("Lower IWAE bound (0's) : ", lower_bound)
             print("Upper IWAE bound (true image) : ", upper_bound)
-
+            exit()
             if random: 
                 x_logits_init = torch.zeros_like(b_data)
                 p_x_m = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_init[~b_mask]),1)

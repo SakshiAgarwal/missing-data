@@ -1,4 +1,4 @@
-cuda_n = 3
+cuda_n = 1
 import os
 from numba import cuda
 cuda.select_device(cuda_n)
@@ -104,16 +104,21 @@ if num_epochs>0:
     encoder, decoder = train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, DECODER_PATH = DECODER_PATH)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH)
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH)
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED)
+checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:1')
 encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
+checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:1')
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
+
+encoder.eval()
+decoder.eval()
+encoder_updated.eval()
+encoder_updated_test.eval()
 
 print(torch.cuda.current_device())
 print("model loaded")
@@ -263,12 +268,12 @@ for K_samples in K_samples_ :
                 random = False
 
                 img = b_full.cpu().data.numpy()         ## added .data
-                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
+                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "true.png")
 
                 missing = b_data
                 missing[~b_mask] = 0.5      
                 img = missing.cpu().data.numpy() 
-                plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
+                #plot_image(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
 
                 #lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
                 #upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,1,28,28]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples)
@@ -340,7 +345,7 @@ for K_samples in K_samples_ :
                 #Impute image with pseudo-gibbs
                 pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
                 pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
-                plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
+                #plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
 
                 ##M-with-gibbs sampler
                 start_m = datetime.now()
@@ -359,7 +364,7 @@ for K_samples in K_samples_ :
                 #Impute image with metropolis-within-pseudo-gibbs
                 metropolis_image = b_data.to(device,dtype = torch.float)
                 metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
-                plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
+                #plot_image(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
 
                 if dd:
                     if iterations==-1:
@@ -417,9 +422,9 @@ for K_samples in K_samples_ :
                 print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())
 
                 #print(t1.state_dict())
-                print("a")
+                #print("a")
                 iaf_params.append([t1.state_dict(), t2.state_dict()])
-                print("b")
+                #print("b")
                 #print(t1.state_dict())
                 iaf_iwae += iwae
                 iaf_loss += xm_nelbo_
@@ -442,7 +447,7 @@ for K_samples in K_samples_ :
                 z_params.append(params)
 
                 prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
-                
+
                 ##with random re-inits
                 start_mix = datetime.now()
                 z_nelbo_, z_error_, iwae, logits, means, scales = optimize_mixture(num_epochs = num_epochs_test, p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples)

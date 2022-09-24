@@ -5,6 +5,100 @@ from torchvision import datasets, transforms
 from torch.utils.data.sampler import SubsetRandomSampler
 import torch
 from plot import *
+from sklearn.datasets import load_iris, load_breast_cancer, load_boston 
+import pandas as pd
+
+
+def load_uci_datasets(dataset='iris'):
+	if dataset=='iris':
+		data = load_iris()['data']
+		print(data)
+	elif dataset=='breast_cancer':
+		data = load_breast_cancer(True)[0]
+	elif dataset == 'boston':
+		data = load_boston(True)[0]
+	elif dataset == "red_wine":
+		url = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv"
+		data = np.array(pd.read_csv(url, low_memory=False, sep=';'))
+	elif dataset == "white_wine":
+		url = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
+		data = np.array(pd.read_csv(url, low_memory=False, sep=';'))
+	elif dataset =='banknote':
+		url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00267/data_banknote_authentication.txt"
+		data = np.array(pd.read_csv(url, low_memory=False, sep=','))[:,0:4]
+
+	print(np.mean(data,0), np.std(data,0) )
+	xfull = (data - np.mean(data,0))/np.std(data,0)
+	print(np.shape(xfull))
+	print(xfull[-1])
+	np.random.shuffle(xfull)
+	print(xfull[-1])
+
+	print(np.shape(xfull))
+
+	n = np.shape(xfull)[0] # number of observations
+	p = np.shape(xfull)[1] # number of features
+
+	split1 = int(0.65*n)
+	split2 = int(0.8*n)
+	print(split1, split2)
+	trainset = xfull[:split1]
+	validset = xfull[split1:split2]
+	testset = xfull[split2:]
+
+	n_test = np.shape(testset)[0]
+	##For missing data in testset
+	perc_miss = 0.5 # 50% of missing data
+	xmiss = np.copy(testset)
+	xmiss_flat = xmiss.flatten()
+	miss_pattern = np.random.choice(n_test*p, np.floor(n_test*p*perc_miss).astype(np.int), replace=False)
+	xmiss_flat[miss_pattern] = np.nan 
+	xmiss = xmiss_flat.reshape([n_test,p]) # in xmiss, the missing values are represented by nans
+	mask = np.isfinite(xmiss) # binary mask that indicates which values are missing
+
+	xhat_0 = np.copy(xmiss)
+	xhat_0[np.isnan(xmiss)] = 0
+
+	return trainset, validset, xhat_0, mask, testset
+
+
+def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = False, return_labels=False, ispatches=False, top_half=False):
+	#normalize = transforms.Normalize((0.5), (0.5))
+
+	train_dataset = datasets.MNIST(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
+	valid_dataset = datasets.MNIST(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
+
+	if binary_data:
+		train_dataset.data[train_dataset.data<127]=0.0
+		train_dataset.data[train_dataset.data>=127]=1.0
+		valid_dataset.data[train_dataset.data<127]=0.0
+		valid_train_dataset.data[train_dataset.data>=127]=1.0
+	else:
+		train_dataset.data = (train_dataset.data.double()/255)
+		valid_dataset.data = (valid_dataset.data.double()/255)
+
+	#num_val = int(np.floor(valid_size * len(dataset)))
+	#num_train = len(dataset) - num_val
+	
+	num_train = len(train_dataset)
+	#print(num_train)
+	indices = list(range(num_train))
+	split = int(np.floor(valid_size * num_train))
+	np.random.seed(1234)
+	np.random.shuffle(indices)
+
+	train_idx, valid_idx = indices[split:], indices[:split]
+
+	train_sampler = SubsetRandomSampler(train_idx)
+	valid_sampler = SubsetRandomSampler(valid_idx)
+
+	train_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(train_dataset, patches=ispatches, top_half=top_half, return_labels = return_labels),batch_size=batch_size, sampler=train_sampler)
+	valid_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(valid_dataset, patches =ispatches, top_half=top_half, return_labels = return_labels),batch_size=1, sampler=valid_sampler)
+	return train_loader, valid_loader
+
+
+
+
 
 class SVHN_Test(Dataset):
 	def __init__(self, perc_miss=0, top_half=False, patches=False, noise=False, std=0):

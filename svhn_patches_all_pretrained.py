@@ -34,11 +34,13 @@ from init_methods import *
 from pyro.nn import AutoRegressiveNN
 from gmms import *
 
+from vae_model import VAE
+
 """
 Initialize Hyperparameters
 """
 
-d = 50 #latent dim
+d = 100 #latent dim
 batch_size = 64
 learning_rate = 1e-3
 num_epochs = 0
@@ -53,8 +55,8 @@ num_epochs_test = 300
 #results=os.getcwd() + "/results/mnist-" + str(binary_data) + "-beta-annealing-"
 ##Results for alpha-annealing
 results=os.getcwd() + "/results/svhn/" 
-ENCODER_PATH = "models/svhn_e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
-DECODER_PATH = "models/svhn_d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
+PATH = "models/model.pth"  ##without 20 is d=50
+#DECODER_PATH = "models/svhn_d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
 
 """
 Create dataloaders to feed data into the neural network
@@ -77,15 +79,17 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #encoder =  FlatWideResNet(channels=channels, size=2, levels=3, blocks_per_level=4, out_features = 2*d, shape=(p,q))
 #decoder = FlatWideResNetUpscaling(channels=channels, size=2, levels=3, blocks_per_level=4, in_features = d, shape=(p,q), model ='sigma_vae')
 
-encoder =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
-decoder = FlatWideResNetUpscaling(channels=channels, size=1, levels=3, blocks_per_level=2, in_features = d, shape=(p,q), model ='sigma_vae')
+#encoder =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
+#decoder = FlatWideResNetUpscaling(channels=channels, size=1, levels=3, blocks_per_level=2, in_features = d, shape=(p,q), model ='sigma_vae')
 
-encoder = encoder.cuda()
-decoder = decoder.cuda()
+model = VAE(d).to(device)
+
+#encoder = encoder.cuda()
+#decoder = decoder.cuda()
 print(torch.cuda.current_device())
 #print(sigma_decoder.is_leaf)
 
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=learning_rate)
+optimizer = torch.optim.Adam(list(model.parameters()), lr=learning_rate)
 
 """
 Training the network for a given number of epochs
@@ -100,10 +104,10 @@ if num_epochs>0:
     encoder, decoder = train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
-encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
-decoder.load_state_dict(checkpoint['model_state_dict'])
+checkpoint = torch.load(PATH, map_location='cuda:1')
+model.load_state_dict(checkpoint['model'])
+#checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
+#decoder.load_state_dict(checkpoint['model_state_dict'])
 print(torch.cuda.current_device())
 print("model loaded")
 
@@ -115,10 +119,8 @@ if os.path.exists(file_save):
 else:
     train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data='svhn')
 
-for params in encoder.parameters():
-    params.requires_grad = False
 
-for params in decoder.parameters():
+for params in model.parameters():
     params.requires_grad = False
 
 burn_in_period = 20
@@ -127,10 +129,11 @@ mixture_loss = np.zeros((6,10,num_epochs_test))
 mixture_mse = np.zeros((6,10,num_epochs_test))
 
 ###Generate 500 samples from decoder
-#for i in range(500):
-#    x = generate_samples(p_z, decoder, d, L=1).cpu().data.numpy().reshape(1,1,28,28)  
-#    plot_image(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
+for i in range(10):
+    x = generate_samples(p_z, model, d, L=1).cpu().data.numpy().reshape(1,3,32,32)  
+    plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
 
+exit()
 #xm_loss = np.zeros((6,10,num_epochs_test))
 #xm_loss_per_img = np.zeros((6,10,num_epochs_test))
 #xm_mse_per_img = np.zeros((6,10,num_epochs_test))
@@ -224,10 +227,10 @@ for iterations in range(1):
             nb += 1
             if nb==1001:
                 break
-            #if nb<20:
-            #    continue
-            #if nb==21:
-            #    break
+            if nb<20:
+                continue
+            if nb==21:
+                break
             
             print("Image : ", nb)
             b_data, b_mask, b_full = data
@@ -254,11 +257,11 @@ for iterations in range(1):
             img = missing.cpu().data.numpy() 
             plot_image_svhn(np.squeeze(img),results + str(i) + "/images/" + str(nb%10) + "/"  +  "missing.png" )
 
-            lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
-            upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
+            #lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
+            #upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
 
-            print("Lower IWAE bound (0's) : ", lower_bound)
-            print("Upper IWAE bound (true image) : ", upper_bound)
+            #print("Lower IWAE bound (0's) : ", lower_bound)
+            #print("Upper IWAE bound (true image) : ", upper_bound)
 
             if random: 
                 x_logits_init = torch.zeros_like(b_data)

@@ -1,12 +1,6 @@
-
 import os
 from numba import cuda
-cuda.select_device(3)
-print(cuda.current_context().get_memory_info())
-os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
 import torch
-torch.cuda.set_device(3)
-print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,8 +19,6 @@ from pyro.distributions.transforms import AffineAutoregressive
 import pyro
 from mixture import *
 from inference import *
-
-
 
 def pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q,d, data):
 	zgivenx_flat = zgivenx.reshape([K_samples,d])
@@ -51,10 +43,9 @@ def pass_decoder(K_samples, zgivenx, decoder, b_full, b_mask, channels, p, q,d, 
 	return logpxmissgivenz, all_logits_obs_model
 
 def evaluate_z(p_z, b_data, b_full, b_mask, z_params, decoder, device, d, results, nb , K_samples, data='mnist', ismixture=False):
-
 	if ismixture:
 		[logits, means, scales] = z_params
-		q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales)) 
+		q_z = ReparameterizedNormalMixture1d(logits.to(device,dtype = torch.float), means.to(device,dtype = torch.float), torch.nn.Softplus()(scales.to(device,dtype = torch.float))) 
 	else:
 		q_z = td.Independent(td.Normal(loc=z_params[...,:d], scale=torch.nn.Softplus()(z_params[...,d:])),1)
 
@@ -72,12 +63,11 @@ def evaluate_z(p_z, b_data, b_full, b_mask, z_params, decoder, device, d, result
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
-	predicted_image = b_data
-	predicted_image[~b_mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~b_mask])
-	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
-
-	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
+	#index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	#predicted_image = b_data
+	#predicted_image[~b_mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~b_mask])
+	#print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+	return iwae #, np.squeeze(predicted_image.cpu().data.numpy())
 
 def eval_baseline(K_samples, p_z, encoder, decoder, iota_x, full, mask, d, data='mnist', with_labels=False):
 
@@ -106,13 +96,13 @@ def eval_baseline(K_samples, p_z, encoder, decoder, iota_x, full, mask, d, data=
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
-	predicted_image = iota_x
-	predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
-	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+	#index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	#predicted_image = iota_x
+	#predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
+	#print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
 	#img = predicted_image.cpu().data.numpy()
 
-	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
+	return iwae #, np.squeeze(predicted_image.cpu().data.numpy())
 
 
 def evaluate_pseudo_gibbs(K_samples, p_z, encoder, decoder, x_init, iota_x, full, mask, d, device, data='mnist', with_labels=False):
@@ -146,12 +136,12 @@ def evaluate_pseudo_gibbs(K_samples, p_z, encoder, decoder, x_init, iota_x, full
 	for i in np.arange(K_samples):
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
-	predicted_image = iota_x
-	predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
-	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+	#index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	#predicted_image = iota_x
+	#predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
+	#print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
 
-	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
+	return iwae #, np.squeeze(predicted_image.cpu().data.numpy())
 
 
 def evaluate_metropolis_within_gibbs(K_samples, p_z, encoder, decoder, x_init, iota_x, full, mask, d, device, data='mnist', with_labels=False):
@@ -172,21 +162,22 @@ def evaluate_metropolis_within_gibbs(K_samples, p_z, encoder, decoder, x_init, i
 		#print(logpxmissgivenz[:i] + logpz[:i] - logqz[:i])
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
-	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
-	predicted_image = iota_x
-	predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
-	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+	#index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	#predicted_image = iota_x
+	#predicted_image[~mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~mask])
+	#print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
 
-	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
+	return iwae #, np.squeeze(predicted_image.cpu().data.numpy())
 
 
 def evaluate_iaf(p_z, b_data, b_full, b_mask, iaf_params, encoder, decoder, device, d, results, nb , K_samples, data='mnist'):
 
 	[t1, t2] = iaf_params
-	autoregressive_nn =  AutoRegressiveNN(d, [320, 320]).cuda()
-	autoregressive_nn2 =  AutoRegressiveNN(d, [320, 320]).cuda()
+	autoregressive_nn =  AutoRegressiveNN(d, [320, 320]).cuda() .to(device,dtype = torch.float)
+	autoregressive_nn2 =  AutoRegressiveNN(d, [320, 320]).cuda() .to(device,dtype = torch.float)
 	autoregressive_nn.load_state_dict(t1)
 	autoregressive_nn2.load_state_dict(t2)
+
 
 	z_params = encoder.forward(b_data.to(device,dtype = torch.float))
 	q_zgivenxobs = td.Independent(td.Normal(loc=z_params[...,:d], scale=torch.nn.Softplus()(z_params[...,d:])),1)
@@ -211,12 +202,10 @@ def evaluate_iaf(p_z, b_data, b_full, b_mask, iaf_params, encoder, decoder, devi
 		iwae[i] = torch.logsumexp(logpxmissgivenz[:i] + logpz[:i] - logqz[:i], 0).cpu().data
 
 
-	index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
-	predicted_image = b_data
-	predicted_image[~b_mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~b_mask])
-	print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
-
-
-	return iwae, np.squeeze(predicted_image.cpu().data.numpy())
+	#index_ = torch.argmax(logpxmissgivenz + logpz - logqz)
+	#predicted_image = b_data
+	#predicted_image[~b_mask] = torch.sigmoid(all_logits_obs_model.reshape(K_samples,1,1,28,28)[index_,~b_mask])
+	#print(logpxmissgivenz[index_] + logpz[index_] - logqz[index_])
+	return iwae #, np.squeeze(predicted_image.cpu().data.numpy())
 
 

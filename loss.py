@@ -170,6 +170,38 @@ def softclip(tensor, min):
 
     return result_tensor
 
+def miwae_loss(iota_x,mask, encoder, decoder, log_sigma, d, K, p_z):
+    batch_size = iota_x.shape[0]
+    p = iota_x.shape[1]
+    out_encoder = encoder(iota_x)
+    q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[..., :d],scale=torch.nn.Softplus()(out_encoder[..., d:(2*d)])),1)
+
+    zgivenx = q_zgivenxobs.rsample([K])
+    zgivenx_flat = zgivenx.reshape([K*batch_size,d])
+
+    out_decoder = decoder(zgivenx_flat)
+    all_means_obs_model = out_decoder
+    log_sigma = softclip(log_sigma, -6)
+    all_scales_obs_model = torch.nn.Softplus()(log_sigma) + 0.001
+    all_scales_obs_model = torch.Tensor.repeat(all_scales_obs_model,[batch_size*K,1])
+
+    data_flat = torch.Tensor.repeat(iota_x,[K,1]).reshape([-1,1])
+    tiledmask = torch.Tensor.repeat(mask,[K,1])
+
+    all_log_pxgivenz_flat = td.Normal(loc = all_means_obs_model.reshape([-1,1]), scale = all_scales_obs_model.cuda().reshape([-1,1])).log_prob(data_flat)
+    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,p])
+
+    logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size])
+
+    k_l = latent_loss(all_means_obs_model,all_scales_obs_model)
+    logpz = p_z.log_prob(zgivenx)
+    logq = q_zgivenxobs.log_prob(zgivenx)
+    #print(logpz.shape, logq.shape)
+
+    neg_bound = -torch.mean(logpxobsgivenz + logpz - logq)   #torch.logsumexp(
+    print(neg_bound)
+    return neg_bound
+
 def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1):
     batch_size = iota_x.shape[0]
     channels = iota_x.shape[1]
@@ -211,6 +243,9 @@ def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1):
     log_like = torch.mean(torch.sum(logpz + logpxobsgivenz_,0))
     #print(torch.sum(logpz), torch.sum(logpxobsgivenz_))
     return neg_bound, log_like
+
+
+
 
 def latent_loss(z_mean, z_stddev):
     mean_sq = z_mean * z_mean
@@ -371,6 +406,7 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
             pyro.module("my_transform", transform)  
             flow_dist = pyro.distributions.torch.TransformedDistribution(q_zgivenxobs, [transform, transform2]) #, transform2, transform3, transform4, transform5
             zgivenx = flow_dist.rsample([K])  
+            #print(zgivenx)
             #print(z.shape)
             logqz = flow_dist.log_prob(zgivenx).reshape(K,batch_size)
             logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)    
@@ -385,7 +421,7 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
     zgivenx_flat = zgivenx.reshape([K*K_z*batch_size,d])
     all_logits_obs_model = decoder.forward(zgivenx_flat)
     #print(all_logits_obs_model, torch.sum(torch.isnan(all_logits_obs_model)))
-
+    #print(all_logits_obs_model)
     data_flat = iota_x_.reshape([-1,1])
 
     if evaluate:
@@ -412,6 +448,8 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
 
     if evaluate:
         neg_bound = - torch.logsumexp(logpxmissgivenz + logpz - logqz, 0)
+        #print(logpxmissgivenz)
+        #print(torch.mean(logqz - logpz))
     #print(-torch.mean(logpxobsgivenz).item(), torch.mean(k_l).item())
     #print(logpxobsgivenz, k_l)
     #print(neg_bound)
@@ -1088,11 +1126,12 @@ def xm_impute(iota_x,mask,p_z, p_xm, encoder, decoder, d, L=1):
 def generate_samples(p_z, decoder, d, L=1, data="mnist"):
     z = p_z.sample([L])
     z_flat = z.reshape([L,d])
-    all_logits_obs_model = decoder.forward(z_flat)
 
     if data =='svhn':
+        all_logits_obs_model = decoder.decoder(z_flat)
         xm = all_logits_obs_model.reshape([1,3,32*32])
     else:
+        all_logits_obs_model = decoder.forward(z_flat)
         xm = torch.sigmoid(all_logits_obs_model).reshape([1,1,28*28])
     return xm
 
