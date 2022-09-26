@@ -20,7 +20,6 @@ def plot_loss_vs_sample_size(mixture_loss_samples, K_samples_ ,save_directory):
 		plt.savefig(save_directory + str(i) +'-mixture-loss-samples.png')
 		plt.close()
 
-
 def scatter_plot_(X, num_components, file):
 	x = np.arange(num_components+2)
 	ys = [i+x+(i*x)**2 for i in range(num_components+2)]

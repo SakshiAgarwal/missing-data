@@ -177,6 +177,7 @@ def train_pygivenx(num_epochs, train_loader, val_loader, ENCODER_PATH, results, 
 	CEloss = torch.nn.CrossEntropyLoss()
 
 	for epoch in range(num_epochs):
+		print(epoch)
 		train_loss = 0
 		train_log_likelihood = 0
 		nb = 0
@@ -251,18 +252,30 @@ def train_pygivenx(num_epochs, train_loader, val_loader, ENCODER_PATH, results, 
 	return encoder
 
 
-def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early):
+def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, annealing=False):
 	print("Training ---")
 
 	torch.cuda.empty_cache()
 
+	best_loss = 2000000
+	stop_early = True
+
+	step = 0
+	k_l_train = []
+	loglike_train = []
+	loss_train = []
 	for epoch in range(num_epochs):
 		train_loss = 0
 		train_log_likelihood = 0
 		nb = 0
 		train_mse = 0
+		k_l_epoch = 0
+		loglike_epoch = 0
+
 		for data in train_loader:
 			nb +=1
+			step += 1
+			alpha = min(step / 500., 10.)
 			b_data, b_mask = data
 			batch_size = b_data.shape[0]
 			#print(b_data.dtype)
@@ -270,26 +283,37 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 			b_mask = b_mask.to(device,dtype = torch.float)
 			# calculate mvae loss
 			batch_size = b_data.shape[0]
-			loss, loglike = mvae_loss_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=1)
+			
+			if annealing:
+				loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=1, alpha=alpha)
+			else:
+				loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=1, alpha=1)
+
 			# Backpropagation based on the loss
 			optimizer.zero_grad()
 			loss.backward()
 			optimizer.step()
-			#print('Epoch {}: Loss {}'.format(epoch, loss))
 
+			loglike_epoch += float(loglike)
+			k_l_epoch += float(k_l)
 			train_log_likelihood += float(loglike)
 			train_loss += float(loss)
 
-			xhat = mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder,  p_z = p_z, d=d, L=1)[0].cpu().data.numpy().reshape(batch_size,3,32,32)
+			#xhat = mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder,  p_z = p_z, d=d, L=1)[0].cpu().data.numpy().reshape(batch_size,3,32,32)
 
-			b_mask = b_mask.cpu().data.numpy().astype(bool)
+			#b_mask = b_mask.cpu().data.numpy().astype(bool)
 			#b_mask = 1
 			#b_mask[b_data>0] = 0
-			err = np.array([mse(xhat,b_data.cpu().data.numpy(),~b_mask)])
+			#err = np.array([mse(xhat,b_data.cpu().data.numpy(),~b_mask)])
 
-			train_mse += float(err)
+			#train_mse += float(err)
 				#print(err)
 
+		k_l_train.append(k_l_epoch/nb)
+		loss_train.append(train_loss/nb)
+		loglike_train.append(loglike_epoch/nb)
+
+		print(step)
 		gc.collect()
 
 		train_loss = train_loss/nb
@@ -297,9 +321,9 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 		print('Epoch {}: Training : Loss {}, log-likelihood {}'.format(epoch, train_loss, train_log_likelihood))
 
 
-		with open(results + ".txt", 'a') as f:
-		    #f.write(str(-train_loss.cpu().data.numpy().astype(np.float)) + " \t " + str(train_log_likelihood.cpu().data.numpy().astype(np.float)) + "\t")
-			f.write("Train-loglikelihood/pixel " + str((train_log_likelihood/(batch_size*32*32))) + " \t Train-log-likelihood/batch" + str(train_log_likelihood) + "\t")
+		#with open(results + ".txt", 'a') as f:
+		#f.write(str(-train_loss.cpu().data.numpy().astype(np.float)) + " \t " + str(train_log_likelihood.cpu().data.numpy().astype(np.float)) + "\t")
+		#	f.write("Train-loglikelihood/pixel " + str((train_log_likelihood/(batch_size*32*32))) + " \t Train-log-likelihood/batch" + str(train_log_likelihood) + "\t")
 		
 		#print('MIWAE likelihood bound  %g' %(-np.log(K)-miwae_loss(iota_x = torch.from_numpy(xhat_0).float().cuda(),mask = torch.from_numpy(mask).float().cuda()).cpu().data.numpy())) # Gradient step
 
@@ -313,10 +337,8 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 				b_data_val, b_mask_val = data
 				b_data_val = b_data_val.to(device,dtype = torch.float)
 				b_mask_val = b_mask_val.to(device,dtype = torch.float)
-
 				batch_size = b_data_val.shape[0]
-				#print(batch_size,b_data_val[0])
-				loss, loglike = mvae_loss_svhn(iota_x = b_data_val,mask = b_mask_val,encoder = encoder, decoder = decoder, p_z= p_z, d=d, K=1)
+				loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data_val,mask = b_mask_val,encoder = encoder, decoder = decoder, p_z= p_z, d=d, K=1, alpha=1)
 				val_log_likelihood += float(loglike)
 				val_loss += float(loss)
 
@@ -329,18 +351,16 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 				best_loss = val_loss
 				torch.save({'model_state_dict': encoder.state_dict()}, ENCODER_PATH)
 				torch.save({'model_state_dict': decoder.state_dict()}, DECODER_PATH)
-			else:
-				count += 1
-				if(count>2):
-					break
+				print("model saved at epoch :", epoch)
 		else:
 			torch.save({'model_state_dict': encoder.state_dict()}, ENCODER_PATH)
 			torch.save({'model_state_dict': decoder.state_dict()}, DECODER_PATH)
 #			torch.save({'model_state_dict': sigma_decoder.state_dict()}, DECODER_PATH)
 
-		with open(results + ".txt", 'a') as f:
-			### SAVE ELBO (-loss) and likelihood
-			f.write(str((val_log_likelihood/(batch_size*32*32))) + " \t " + str(val_log_likelihood) + "\n")
+	#x = np.arange(10)
+	#plt.plot(x, k_l_train, color='red', label="kl")
+	#plt.plot(x, loss_train, color='black', label="loss")
+	#plt.plot(x, loglike_train, color='orange', label="p(x|z)")
 
 	print("Memory allocated after training ---")
 	torch.cuda.empty_cache()

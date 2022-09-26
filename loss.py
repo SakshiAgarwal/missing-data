@@ -170,41 +170,6 @@ def softclip(tensor, min):
 
     return result_tensor
 
-##For uci datasets
-def miwae_loss(iota_x,mask, encoder, decoder, d, K, p_z):
-    batch_size = iota_x.shape[0]
-    p = iota_x.shape[1]
-    out_encoder = encoder(iota_x)
-    q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[..., :d],scale=torch.nn.Softplus()(out_encoder[..., d:(2*d)])),1)
-
-    zgivenx = q_zgivenxobs.rsample([K])
-    zgivenx_flat = zgivenx.reshape([K*batch_size,d])
-
-    out_decoder = decoder(zgivenx_flat)
-
-    all_means_obs_model = out_decoder[..., :p]
-    all_scales_obs_model = torch.nn.Softplus()(out_decoder[..., p:]) + 0.001
-    #log_sigma = softclip(log_sigma, -6)
-    #all_scales_obs_model = torch.nn.Softplus()(log_sigma) + 0.001
-    #all_scales_obs_model = torch.Tensor.repeat(all_scales_obs_model,[batch_size*K,1])
-
-    data_flat = torch.Tensor.repeat(iota_x,[K,1]).reshape([-1,1])
-    tiledmask = torch.Tensor.repeat(mask,[K,1])
-
-    all_log_pxgivenz_flat = td.Normal(loc = all_means_obs_model.reshape([-1,1]), scale = all_scales_obs_model.cuda().reshape([-1,1])).log_prob(data_flat)
-    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,p])
-
-    logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size])
-
-    k_l = latent_loss(all_means_obs_model,all_scales_obs_model).reshape([K,batch_size])
-    logpz = p_z.log_prob(zgivenx)
-    logq = q_zgivenxobs.log_prob(zgivenx)
-    #print(logpz.shape, logq.shape)
-
-    #neg_bound = -torch.mean(logpxobsgivenz + logpz - logq)   #torch.logsumexp(
-    neg_bound = -torch.mean(logpxobsgivenz - k_l)
-    print(torch.mean(logpxobsgivenz), torch.mean(k_l))
-    return neg_bound
 
 ##For uci datasets
 def miwae_impute_uci(iota_x,mask,encoder,decoder,p_z, d, L=1, with_labels=False, labels= None, return_sample = False):
@@ -242,16 +207,20 @@ def miwae_impute_uci(iota_x,mask,encoder,decoder,p_z, d, L=1, with_labels=False,
     else:
         return all_means_obs_model.reshape(L,p)
 
-def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1):
+def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1, alpha=1):
     batch_size = iota_x.shape[0]
     channels = iota_x.shape[1]
     p = iota_x.shape[2]
     q = iota_x.shape[3]
 
     #print(iota_x.size())
+    #print(iota_x)
     out_encoder = encoder.forward(iota_x)
-    q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+    #print(out_encoder)
+    scales_z = 1e-2 + (out_encoder[...,d:]).exp()
+    q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale = scales_z),1)
 
+    k_l = latent_loss(out_encoder[...,:d], scales_z).reshape([K,batch_size])
     zgivenx = q_zgivenxobs.rsample([K])
     zgivenx_flat = zgivenx.reshape([K*batch_size,d])
     #print(zgivenx.size(),zgivenx_flat.size(), iota_x.size())
@@ -266,11 +235,11 @@ def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1):
     tiledmask = torch.Tensor.repeat(mask_,[K,1])                   # mask.reshape([batch_size,28*28])
 
     sigma_decoder = decoder.get_parameter("log_sigma")
-    sigma_decoder = softclip(sigma_decoder, -6)
+    #sigma_decoder = softclip(sigma_decoder, -6)
 
     #rec = gaussian_nll(x_hat, log_sigma, x).sum()
     ##Do the sigma normal distribution....
-    all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+    all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = (1e-2 + sigma_decoder.exp())*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
     all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,channels*p*q])
 
     logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,[1]).reshape([K,batch_size])
@@ -278,13 +247,14 @@ def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1):
 
     logpz = p_z.log_prob(zgivenx)
     logq = q_zgivenxobs.log_prob(zgivenx)
-    neg_bound = -torch.mean(torch.logsumexp(logpxobsgivenz + logpz - logq,0))
+
+
+    #eg_bound = -torch.mean(torch.logsumexp(logpxobsgivenz - alpha*k_l,0))
+    neg_bound = - torch.mean(logpxobsgivenz - alpha*k_l)
     #log_like = torch.mean(torch.logsumexp(logpxobsgivenz + logpz,0))
     log_like = torch.mean(torch.sum(logpz + logpxobsgivenz_,0))
     #print(torch.sum(logpz), torch.sum(logpxobsgivenz_))
-    return neg_bound, log_like
-
-
+    return neg_bound, log_like, torch.mean(k_l), torch.mean(logpxobsgivenz)
 
 
 def latent_loss(z_mean, z_stddev):
@@ -500,6 +470,99 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
     else:
         return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l), z_params
 
+
+def z_loss_table(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1, data='mnist', iaf=False, autoregressive_nn=None, autoregressive_nn2 = None, autoregressive_nn3 = None, autoregressive_nn4 = None, autoregressive_nn5 = None, evaluate=False, full = None):
+    ##iota_x is the missing image, sampled is not to be used, ...
+    iota_x_ = torch.Tensor.repeat(iota_x,[K,1]) 
+    batch_size = iota_x.shape[0]
+    p = iota_x.shape[1]
+    mp = len(iota_x[~mask])
+    q_zgivenxobs = td.Independent(td.Normal(loc=z_params[...,:d], scale=torch.nn.Softplus()(z_params[...,d:])),1)
+
+    k_l = torch.zeros(K,batch_size)
+    zgivenx = torch.zeros(K*batch_size,d)
+    
+    if iaf:
+        #zgivenx, k_l, flow_dist = inverse_autoregressive_flow(q_zgivenxobs, p_z, autoregressive_nn, d, K)
+        T=1
+        for i in range(T):
+            transform = AffineAutoregressive(autoregressive_nn).cuda()
+            transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
+            pyro.module("my_transform", transform)  
+            flow_dist = pyro.distributions.torch.TransformedDistribution(q_zgivenxobs, [transform, transform2]) #, transform2, transform3, transform4, transform5
+            zgivenx = flow_dist.rsample([K])  
+            logqz = flow_dist.log_prob(zgivenx).reshape(K,batch_size)
+            logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)    
+            k_l = torch.mean(logqz - logpz)
+    else:
+        zgivenx = q_zgivenxobs.rsample([K*K_z])
+        k_l = latent_loss(z_params[...,:d], torch.nn.Softplus()(z_params[...,d:]))
+        logqz = q_zgivenxobs.log_prob(zgivenx).reshape(K,batch_size)
+        logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)    #print("sampled z ---",zgivenx)
+
+    zgivenx_flat = zgivenx.reshape([K*K_z*batch_size,d])
+    out_decoder = decoder(zgivenx_flat)
+    data_flat = iota_x_.reshape([-1,1])
+
+    all_means_obs_model = out_decoder[..., :p]
+    all_scales_obs_model = torch.nn.Softplus()(out_decoder[..., p:]) + 0.001
+
+    if evaluate:
+        full_ = torch.Tensor.repeat(full,[K,1]) 
+        data_flat = full_.reshape([-1,1])
+    
+    data_flat = iota_x_.reshape([-1,1])
+    tiledmask = torch.Tensor.repeat(mask,[K,1])
+
+    all_log_pxgivenz_flat = td.Normal(loc = all_means_obs_model.reshape([-1,1]), scale = all_scales_obs_model.cuda().reshape([-1,1])).log_prob(data_flat)
+    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,p])
+
+    logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size])
+    logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,batch_size]) 
+
+    neg_bound = - (torch.mean(logpxobsgivenz)  - k_l) ## remove logxmissgivenz
+
+    if evaluate:
+        neg_bound = - torch.logsumexp(logpxmissgivenz + logpz - logqz, 0)
+
+    approx_bound = torch.mean(logpz + logpxobsgivenz)
+
+    if iaf:
+        return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l), flow_dist
+    else:
+        return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l), z_params
+
+def miwae_loss(iota_x,mask, encoder, decoder, d, K, p_z):
+    batch_size = iota_x.shape[0]
+    p = iota_x.shape[1]
+    out_encoder = encoder(iota_x)
+    q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[..., :d],scale=torch.nn.Softplus()(out_encoder[..., d:(2*d)])),1)
+
+    zgivenx = q_zgivenxobs.rsample([K])
+    zgivenx_flat = zgivenx.reshape([K*batch_size,d])
+
+    k_l = latent_loss(out_encoder[...,:d], torch.nn.Softplus()(out_encoder[...,d:]))
+    out_decoder = decoder(zgivenx_flat)
+
+    all_means_obs_model = out_decoder[..., :p]
+    all_scales_obs_model = torch.nn.Softplus()(out_decoder[..., p:]) + 0.001
+
+    data_flat = torch.Tensor.repeat(iota_x,[K,1]).reshape([-1,1])
+    tiledmask = torch.Tensor.repeat(mask,[K,1])
+
+    all_log_pxgivenz_flat = td.Normal(loc = all_means_obs_model.reshape([-1,1]), scale = all_scales_obs_model.cuda().reshape([-1,1])).log_prob(data_flat)
+    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,p])
+
+    logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size])
+
+    logpz = p_z.log_prob(zgivenx)
+    logq = q_zgivenxobs.log_prob(zgivenx)
+    #print(logpz.shape, logq.shape)
+
+    #neg_bound = -torch.mean(logpxobsgivenz + logpz - logq)   #torch.logsumexp(
+    neg_bound = -torch.mean(logpxobsgivenz - k_l)
+    print(torch.mean(logpxobsgivenz), torch.mean(k_l))
+    return neg_bound
 
 def z_loss_with_labels(iota_x, mask, p_z, p_y, means, scales, logits_y, encoder, decoder, device, d, K, K_z, data='mnist', iwae='False', evaluate=False, full = None,iaf=False, autoregressive_nn = None, autoregressive_nn2= None):
     
@@ -1076,7 +1139,7 @@ def mvae_impute(iota_x,mask,encoder,decoder,p_z, d, L=1, with_labels=False, labe
     return xm_logits, out_encoder
           
 
-def mvae_impute_svhn_prev(iota_x, mask, encoder, decoder, p_z, d, L=1):
+def mvae_impute_svhn(iota_x, mask, encoder, decoder, p_z, d, L=1):
     batch_size = iota_x.shape[0]
     p = iota_x.shape[2]
     q = iota_x.shape[3]
@@ -1121,7 +1184,7 @@ def mvae_impute_svhn_prev(iota_x, mask, encoder, decoder, p_z, d, L=1):
     return xm_logits, out_encoder, sigma_decoder
 
 
-def mvae_impute_svhn(iota_x, mask, model, p_z, d, L=1):
+def mvae_impute_svhn_trash(iota_x, mask, model, p_z, d, L=1):
     batch_size = iota_x.shape[0]
     p = iota_x.shape[2]
     q = iota_x.shape[3]

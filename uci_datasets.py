@@ -34,6 +34,7 @@ from init_methods import *
 from pyro.nn import AutoRegressiveNN
 from gmms import *
 import pickle
+from inference_uci_datasets import *
 
 """
 Initialize Hyperparameters
@@ -41,7 +42,7 @@ Initialize Hyperparameters
 
 batch_size = 64
 learning_rate = 1e-3
-num_epochs = 0 #2002
+num_epochs = 2002 #2002
 K=1
 num_epochs_test = 300
 dataset='banknote'
@@ -308,7 +309,6 @@ for K_samples in K_samples_ :
                             burn_in_image[~b_mask] = x_logits_init[~b_mask].to(device,dtype = torch.float)
                             print(burn_in_image)
 
-                    exit()
                     start_pg = datetime.now()
                     x_logits_pseudo_gibbs, x_sample_pseudo_gibbs, iwae, sample = pseudo_gibbs(sampled_image.to(device,dtype = torch.float), b_data.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, results, iterations, T=num_epochs_test, nb=nb, K = 1, full = b_full.reshape([1,4]).to(device,dtype = torch.float))
                     end_pg = datetime.now()
@@ -325,7 +325,6 @@ for K_samples in K_samples_ :
                     plot_image(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
                     images.append(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()))
 
-                    exit()
 
                     ##M-with-gibbs sampler
                     start_m = datetime.now()
@@ -400,21 +399,18 @@ for K_samples in K_samples_ :
                     z_init =  encoder.forward(b_data.to(device,dtype = torch.float))
 
                 start_iaf = datetime.now()
-                xm_nelbo_, xm_error_, iwae, t1, t2, img = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, p_z_eval = p_z_eval , return_imputation=True )
+                xm_nelbo_, xm_error_, iwae, t1, t2 = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, p_z_eval = p_z_eval)
                 end_iaf = datetime.now()
                 diff_iaf = end_iaf - start_iaf
                 print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())
-                images.append(np.squeeze(img))
 
-                #print(t1.state_dict())
                 iaf_params.append([t1.state_dict(), t2.state_dict()])
-                #print(t1.state_dict())
                 iaf_iwae += iwae
                 iaf_loss += xm_nelbo_
                 iaf_mse += xm_error_
 
                 exit()
-                
+
                 b_data[~b_mask] = 0
                 if iterations==-1:
                     z_init =  encoder.forward(b_full.to(device,dtype = torch.float))

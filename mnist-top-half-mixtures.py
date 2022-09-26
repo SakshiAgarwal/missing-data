@@ -1,4 +1,4 @@
-cuda_n = 1
+cuda_n = 3
 import os
 from numba import cuda
 cuda.select_device(cuda_n)

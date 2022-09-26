@@ -39,9 +39,9 @@ Initialize Hyperparameters
 """
 
 d = 50 #latent dim
-batch_size = 64
-learning_rate = 1e-3
-num_epochs = 0
+batch_size = 128
+learning_rate = 3e-4
+num_epochs = 50
 stop_early= False
 binary_data = False
 K=1
@@ -53,8 +53,8 @@ num_epochs_test = 300
 #results=os.getcwd() + "/results/mnist-" + str(binary_data) + "-beta-annealing-"
 ##Results for alpha-annealing
 results=os.getcwd() + "/results/svhn/" 
-ENCODER_PATH = "models/svhn_encoder.pth"  ##without 20 is d=50
-DECODER_PATH = "models/svhn_decoder.pth"  ##simple is for simple VAE
+ENCODER_PATH = "models/svhn_encoder_no_annealing.pth"  ##without 20 is d=50
+DECODER_PATH = "models/svhn_decoder_no_annealing.pth"  ##simple is for simple VAE
 
 """
 Create dataloaders to feed data into the neural network
@@ -83,7 +83,6 @@ decoder = FlatWideResNetUpscaling(channels=channels, size=2, levels=3, dense_blo
 encoder = encoder.cuda()
 decoder = decoder.cuda()
 print(torch.cuda.current_device())
-#print(sigma_decoder.is_leaf)
 
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=learning_rate)
 
@@ -102,11 +101,11 @@ if num_epochs>0:
 ### Load model 
 checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
 print(checkpoint)
-encoder.load_state_dict(checkpoint)
+encoder.load_state_dict(checkpoint['model_state_dict'])
 checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
-checkpoint['log_sigma'] = checkpoint['log_sigma'].unsqueeze(0)
+#checkpoint['log_sigma'] = checkpoint['log_sigma'].unsqueeze(0)
 print(decoder)
-decoder.load_state_dict(checkpoint)
+decoder.load_state_dict(checkpoint['model_state_dict'])
 print(torch.cuda.current_device())
 print("model loaded")
 
@@ -137,7 +136,7 @@ burn_in_period = 20
 
 print(decoder)
 ###Generate 500 samples from decoder
-for i in range(10):
+for i in range(100):
     x = generate_samples(p_z, decoder, d, L=1, data='svhn').cpu().data.numpy().reshape(1,3,32,32)  
     plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
 
@@ -178,8 +177,6 @@ iaf_mixture_reinits_loss =  np.zeros((num_epochs_test))
 K_samples = 1000
 
 print(torch.cuda.current_device())
-
-
 
 for iterations in range(1):
     for i in [-1]:
