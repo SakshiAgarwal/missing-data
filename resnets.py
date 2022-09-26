@@ -285,11 +285,11 @@ class WRNUpscaleLevel(WRNLevel):
         kernel_size: The kernel size for for the convolutional layers.
         activation: An activation function for every layer. Defaults to `relu`.
     """
-    def __init__(self, in_channels, out_channels, blocks=4, kernel_size=3, activation=F.relu, stride=2, bn=True):
+    def __init__(self, in_channels, out_channels, blocks=4, kernel_size=3, activation=F.relu, stride=2, bn=True, transpose=False):
         nn.Module.__init__(self)
-        self.resize_block = UpscaleBlock(in_channels, out_channels, kernel_size, stride, activation)
+        self.resize_block = UpscaleBlock(in_channels, out_channels, kernel_size, stride, activation, transpose=transpose)
         self.blocks = nn.ModuleList(
-            [UpscaleBlock(in_channels, in_channels, kernel_size, 1, activation, bn=bn) for i in range(blocks - 1)])
+            [UpscaleBlock(in_channels, in_channels, kernel_size, 1, activation, bn=bn, transpose=transpose) for i in range(blocks - 1)])
         
     def forward(self, x):
         for block in self.blocks:
@@ -359,7 +359,7 @@ class WideResNetUpscaling(nn.Module):
         activation: An activation function for every layer. Defaults to `relu`.
     """
     def __init__(self, channels, size=2, levels=4, blocks_per_level=4, kernel_size=3, activation=F.relu,
-                 in_features=None, shape=None, bn=True):
+                 in_features=None, shape=None, bn=True, transpose=False):
         nn.Module.__init__(self)
         self.output_conv = nn.Conv2d(size * 16, channels, kernel_size, 1, kernel_size // 2)
         in_channels = (size * 16) * (2 ** (levels - 1))
@@ -368,7 +368,7 @@ class WideResNetUpscaling(nn.Module):
         self.initial_conv = nn.Conv2d(in_features, in_channels, 1, 1) if in_features else Identity()
         self.levels = nn.ModuleList()
         for i in range(levels):
-            self.levels.append(WRNUpscaleLevel(in_channels, out_channels, blocks_per_level, kernel_size, activation, bn=bn, stride=(1 if i == (levels - 1) else 2)))
+            self.levels.append(WRNUpscaleLevel(in_channels, out_channels, blocks_per_level, kernel_size, activation, bn=bn, transpose=transpose, stride=(1 if i == (levels - 1) else 2)))
             in_channels, out_channels = out_channels, out_channels // 2
 
     def forward(self, x):
@@ -467,7 +467,7 @@ class FlatWideResNet(nn.Module):
             features = 8 * size * (2 ** levels)
             self.flatten = GlobalPool2d()
         self.dense_blocks = nn.ModuleList(
-            [DenseBlock(dense_units, dense_units, activation, residual=True, bn=bn) for i in range(dense_blocks)])
+            [DenseBlock(dense_units, dense_units, activation, residual=True, bn=False) for i in range(dense_blocks)])
         if dense_blocks:
             self.dense_blocks.insert(0, nn.Linear(features + label_dims, dense_units))
             self.output_layer = nn.Linear(dense_units, out_features)
@@ -489,7 +489,7 @@ class FlatWideResNet(nn.Module):
 @RegisterNetwork('wrn_upscale', encoder='wrn_inverse', decoder='wrn')
 class FlatWideResNetUpscaling(nn.Module):
     def __init__(self, channels, shape=(32, 32), in_features=None, size=2, levels=4, blocks_per_level=4, kernel_size=3,
-                 activation=F.gelu, dense_blocks=0, bn=True, avg_pool=False, dense_units=1000, model="vae"):
+                 activation=F.gelu, dense_blocks=0, bn=True, avg_pool=False, dense_units=1000, transpose=False, model="vae"):
         nn.Module.__init__(self)
         in_features = dense_units if in_features is None else in_features
         conv_shape, features = wrnsize(shape, size, levels)
@@ -497,7 +497,7 @@ class FlatWideResNetUpscaling(nn.Module):
         self.activation = activation
         self.model = model
         self.dense_blocks = nn.ModuleList(
-            [DenseBlock(dense_units, dense_units, activation, residual=True, bn=bn) for i in range(dense_blocks)])
+            [DenseBlock(dense_units, dense_units, activation, residual=True, bn=False) for i in range(dense_blocks)])
         if dense_blocks:
             self.input_layer = nn.Linear(in_features, dense_units)
             self.dense_blocks.append(nn.Linear(dense_units, features))
@@ -510,7 +510,7 @@ class FlatWideResNetUpscaling(nn.Module):
             #self.log_sigma = torch.nn.Parameter(torch.full((1,), 0)[0], requires_grad=True)
             self.log_sigma = torch.nn.Parameter(torch.rand(1, device='cuda'), requires_grad = True)
 
-        self.wrn = WideResNetUpscaling(channels, size, levels, blocks_per_level, kernel_size, activation, bn=bn)
+        self.wrn = WideResNetUpscaling(channels, size, levels, blocks_per_level, kernel_size, activation, bn=bn, transpose=transpose)
 
     #@torch.cuda.amp.autocast()
     def forward(self, x):

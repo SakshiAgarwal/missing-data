@@ -31,7 +31,33 @@ def burn_in(b_data, b_mask, labels, encoder, decoder, p_z, d, burn_in_period=20,
 
 	return x_logits, b_data, z_init
 
-def burn_in_svhn(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
+def burn_in_table(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20):
+	p = b_data.shape[1]
+	x_logits = b_data.reshape(1,p)
+
+	for l in range(burn_in_period):
+		x_logits, sample = miwae_impute_uci(b_data, b_mask, encoder ,decoder,p_z, d, L=1, return_sample=True)
+		b_data[0,:].reshape([1,p])[~b_mask] = sample[~b_mask]
+
+	return x_logits, b_data
+
+def burn_in_svhn(b_data, b_mask, model, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
+	channels = b_data.shape[1]
+	p = b_data.shape[2]
+	q = b_data.shape[3]
+
+	x_logits = b_data.reshape(1,channels,p,q)
+
+	x_logits, mu, std =  mvae_impute_svhn(iota_x = b_data,mask = b_mask,model = model, p_z = p_z, d=d, L=1)
+
+	for l in range(burn_in_period):
+		x_logits, mu, std = mvae_impute_svhn(iota_x = b_data,mask = b_mask, model = model, p_z = p_z, d=d, L=1)
+		x_logits = x_logits.reshape(1,channels,p,q)
+		b_data[~b_mask] = td.Normal(loc = x_logits, scale =  (torch.ones(*x_logits.shape).cuda())).sample()[~b_mask]
+
+	return x_logits, b_data,  mu, std
+
+def burn_in_svhn_prev(b_data, b_mask, model, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
 	channels = b_data.shape[1]
 	p = b_data.shape[2]
 	q = b_data.shape[3]
@@ -54,6 +80,7 @@ def burn_in_svhn(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20, da
 			b_data[~b_mask] = td.Normal(loc = x_logits, scale =  sigma_decoder.exp()*(torch.ones(*x_logits.shape).cuda())).sample()[~b_mask]
 
 	return x_logits, b_data, z_init
+
 
 def burn_in_noise(b_data, b_mask, encoder, decoder, p_z,  d, burn_in_period=20, sigma=0.1, nb=0):
 

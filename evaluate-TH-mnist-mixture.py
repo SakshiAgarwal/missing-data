@@ -29,6 +29,7 @@ from pyro.nn import AutoRegressiveNN
 from gmms import *
 import pickle
 from evaluate_helper import *
+
 results=os.getcwd() + "/results/mnist-False-"
 binary_data=False
 ENCODER_PATH = "models/e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
@@ -57,16 +58,21 @@ decoder = decoder.cuda()
 encoder_updated = encoder_updated.cuda()
 encoder_updated_test = encoder_updated_test.cuda()
 
-checkpoint = torch.load(ENCODER_PATH)
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:3')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH)
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:3')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED)
+checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:3')
 encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
+checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:3')
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
+
+encoder.eval()
+decoder.eval()
+encoder_updated.eval()
+encoder_updated_test.eval()
 
 for params in encoder.parameters():
     params.requires_grad = False
@@ -87,7 +93,8 @@ g_prior = False
 read_only = False #if we would only read from saved evaluations
 write_only = True
 to_plot = False
-max_samples = 20
+max_samples = 2000
+
 if g_prior:
 	file_save_params = results + str(-1) + "/pickled_files/TH-params_mnist.pkl"
 	with open(file_save_params, 'rb') as file:
@@ -180,7 +187,7 @@ for data in test_loader:
 	metropolis_within_gibbs_iwae += metropolis_within_gibbs_
 	#images.append(img)
 
-	z_ = evaluate_z(p_z = p_z, b_data = b_data.to(device,dtype = torch.float),  b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),z_params = z_params[i-1], decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
+	z_ = evaluate_z(p_z = p_z, b_data = b_data.to(device,dtype = torch.float),  b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),z_params = z_params[i-1].to(device,dtype = torch.float), decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
 	z_iwae += z_
 	#images.append(img)
 
@@ -226,7 +233,7 @@ for data in test_loader:
 			with open(file_save_params, 'wb') as file:
 				pickle.dump([lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i, nb], file)
 
-	if i == 1000:
+	if i == 1001:
 		break
 
 

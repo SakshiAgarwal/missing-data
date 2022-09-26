@@ -1,4 +1,4 @@
-cuda_n = 1
+cuda_n = 0
 import os
 from numba import cuda
 cuda.select_device(cuda_n)
@@ -106,15 +106,15 @@ if num_epochs>0:
     encoder, decoder = train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, DECODER_PATH = DECODER_PATH)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH)
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:0')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH)
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:0')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED)
+checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:0')
 encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
+checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:0')
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
 
 encoder.eval()

@@ -1,10 +1,10 @@
 import os
 from numba import cuda
-cuda.select_device(3)
+cuda.select_device(2)
 print(cuda.current_context().get_memory_info())
-os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '2'
 import torch
-torch.cuda.set_device(3)
+torch.cuda.set_device(2)
 print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -34,10 +34,12 @@ from evaluate_helper import *
 
 results=os.getcwd() + "/results/mnist-False-"
 binary_data=False
+
 ENCODER_PATH = "models/e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
 DECODER_PATH = "models/d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
 ENCODER_PATH_UPDATED = "models/e_model_"+ str(binary_data) + "updated.pt" 
 ENCODER_PATH_UPDATED_Test = "models/e_model_"+ str(binary_data) + "updated_test.pt" 
+
 channels = 1    #1 for MNist
 p = 28          # 28 for mnist
 q = 28
@@ -55,16 +57,22 @@ decoder = decoder.cuda()
 encoder_updated = encoder_updated.cuda()
 encoder_updated_test = encoder_updated_test.cuda()
 
-checkpoint = torch.load(ENCODER_PATH)
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:2')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH)
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:2')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED)
+checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:2')
 encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
+checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:2')
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
+
+
+encoder.eval()
+decoder.eval()
+encoder_updated.eval()
+encoder_updated_test.eval()
 
 for params in encoder.parameters():
     params.requires_grad = False
@@ -79,17 +87,17 @@ for params in decoder.parameters():
     params.requires_grad = False
 
 ##Load parameters --
-g_prior = True
+g_prior = False
 read_only = False #if we would only read from saved evaluations
 write_only = True
 to_plot = False
 max_samples = 2000
-if g_prior:
-	file_save_params = results + str(-1) + "/pickled_files/params_mnist.pkl"
-else:
-	file_save_params = results + str(-1) + "/pickled_files/mixture_params_mnist.pkl"
-	
 
+if g_prior:
+	file_save_params = results + str(-1) + "/pickled_files/params_mnist_patches.pkl"
+else:
+	file_save_params = results + str(-1) + "/pickled_files/params_mnist_mixture_patches.pkl"
+	
 with open(file_save_params, 'rb') as file:
 	[pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb] = pickle.load(file)
 
@@ -101,7 +109,6 @@ if read_only:
 
 	compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae,  colours, x, "Estimated log-likelihood for missing pixels", results + str(-1) + "/compiled/IWAEvsSamples.png", ylim1= None, ylim2 = None)
 	exit()
-
 
 test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=1)
 #x = np.arange(max_samples)
@@ -118,7 +125,6 @@ pseudo_gibbs_iwae = np.zeros((max_samples))
 metropolis_within_gibbs_iwae = np.zeros((max_samples))
 ##Models trained with gaussian priors
 
-
 if g_prior:
 	p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
 else:
@@ -133,7 +139,7 @@ else:
 
 
 #evaluate 
-#print("Total", nb)
+print("Total", nb)
 i=0
 
 for data in test_loader:
@@ -171,7 +177,7 @@ for data in test_loader:
 	metropolis_within_gibbs_iwae += metropolis_within_gibbs_
 	#images.append(img)
 
-	z_ = evaluate_z(p_z = p_z, b_data = b_data.to(device,dtype = torch.float),  b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),z_params = z_params[i-1], decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
+	z_ = evaluate_z(p_z = p_z, b_data = b_data.to(device,dtype = torch.float),  b_full = b_full.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool),z_params = z_params[i-1].to(device,dtype = torch.float), decoder = decoder, device = device, d = d, results = results, nb=nb , K_samples = max_samples )
 	z_iwae += z_
 	#images.append(img)
 
@@ -215,7 +221,7 @@ for data in test_loader:
 			with open(file_save_params, 'wb') as file:
 				pickle.dump([lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i, nb], file)
 
-	if i == 1000:
+	if i == 1001:
 		break
 
 

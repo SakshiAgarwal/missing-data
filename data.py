@@ -27,12 +27,13 @@ def load_uci_datasets(dataset='iris'):
 		url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00267/data_banknote_authentication.txt"
 		data = np.array(pd.read_csv(url, low_memory=False, sep=','))[:,0:4]
 
-	print(np.mean(data,0), np.std(data,0) )
+	np.random.seed(1234)
+	#print(np.mean(data,0), np.std(data,0) )
 	xfull = (data - np.mean(data,0))/np.std(data,0)
-	print(np.shape(xfull))
-	print(xfull[-1])
+	#print(np.shape(xfull))
+	#print(xfull[-1])
 	np.random.shuffle(xfull)
-	print(xfull[-1])
+	#print(xfull[-1])
 
 	print(np.shape(xfull))
 
@@ -41,7 +42,7 @@ def load_uci_datasets(dataset='iris'):
 
 	split1 = int(0.65*n)
 	split2 = int(0.8*n)
-	print(split1, split2)
+	#print(split1, split2)
 	trainset = xfull[:split1]
 	validset = xfull[split1:split2]
 	testset = xfull[split2:]
@@ -58,6 +59,9 @@ def load_uci_datasets(dataset='iris'):
 
 	xhat_0 = np.copy(xmiss)
 	xhat_0[np.isnan(xmiss)] = 0
+
+	#print(xhat_0, testset)
+	#exit()
 
 	return trainset, validset, xhat_0, mask, testset
 
@@ -107,9 +111,15 @@ class SVHN_Test(Dataset):
 		self.images = test_dataset.data 				
 		self.perc_miss = perc_miss
 		##Normalize data to 
-		self.images = (self.images/255)*2 - 1
+		std = [0.2023, 0.1994, 0.2010]
+		mean = [0.4914, 0.4822, 0.4465]
+
+		self.images[:,0,:,:] = (self.images[:,0,:,:]- mean[0])/std[0]
+		self.images[:,1,:,:] = (self.images[:,1,:,:]- mean[1])/std[1]
+		self.images[:,2,:,:] = (self.images[:,2,:,:]- mean[2])/std[2]
 
 		np.random.seed(1234)
+		print(np.max(self.images), np.min(self.images))
 
 		self.n=self.images.shape[0]
 		self.channels = self.images.shape[1]
@@ -434,8 +444,14 @@ def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data
 		valid_dataset.data[train_dataset.data<127]=0.0
 		valid_train_dataset.data[train_dataset.data>=127]=1.0
 	else:
-		train_dataset.data = (train_dataset.data/255)*2 - 1
-		valid_dataset.data = (valid_dataset.data/255)*2 - 1
+		#train_dataset.data = (train_dataset.data/255)*2 - 1
+		#valid_dataset.data = (valid_dataset.data/255)*2 - 1
+		std = [0.2023, 0.1994, 0.2010]
+		mean = [0.4914, 0.4822, 0.4465]
+		train_dataset.data[:,0,:,:] = (train_dataset.data[:,0,:,:] - mean[0])/std[0]
+		train_dataset.data[:,1,:,:] = (train_dataset.data[:,1,:,:] - mean[1])/std[1]
+		train_dataset.data[:,2,:,:] = (train_dataset.data[:,2,:,:] - mean[2])/std[2]
+
 
 	#num_val = int(np.floor(valid_size * len(dataset)))
 	#num_train = len(dataset) - num_val

@@ -19,7 +19,7 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	out_encoder = encoder.forward(iota_x)
-	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=(out_encoder[...,d:]).exp()),1) #torch.nn.Softplus()
 	zgivenx = q_zgivenxobs.rsample([K]).reshape(K,d) 
 
 	if with_labels:
@@ -61,6 +61,82 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 	#print(torch.mean(logpmissgivenz), torch.mean(logqz-logpz))
 	#print("observed -- ", (torch.mean(logpxobsgivenz) - torch.mean(logqz - logpz)))
 
+	return iwae_bound
+
+def eval_iwae_bound_table(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labels=False, labels= None, data='mnist' ):
+	p = iota_x.shape[1]
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+	out_encoder = encoder(iota_x)
+	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+	zgivenx = q_zgivenxobs.rsample([K]).reshape(K,d) 
+	zgivenx_flat = zgivenx.reshape([K,d])
+
+	out_decoder = decoder(zgivenx_flat)
+
+	all_means_obs_model = out_decoder[..., :p]
+	all_scales_obs_model = torch.nn.Softplus()(out_decoder[..., p:]) + 0.001
+
+	data_flat = torch.Tensor.repeat(full,[K,1]).reshape([-1,1])
+	tiledmask = torch.Tensor.repeat(mask,[K,1])
+
+	all_log_pxgivenz_flat = td.Normal(loc = all_means_obs_model.reshape([-1,1]), scale = all_scales_obs_model.cuda().reshape([-1,1])).log_prob(data_flat)
+	all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*1,p])
+
+	logpmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,1])
+	logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,1])
+
+	logpz = p_z.log_prob(zgivenx).reshape([K,1])
+	logqz = q_zgivenxobs.log_prob(zgivenx).reshape([K,1])
+	iwae_bound = torch.logsumexp(logpmissgivenz + logpz - logqz, 0) ##Plots for this.
+	print(torch.mean(logpmissgivenz), torch.mean(logqz - logpz))
+
+	return iwae_bound
+
+
+
+def eval_iwae_bound_svhn(iota_x, full, mask, model, p_z, d, K=1, with_labels=False, labels= None, data='mnist', results = None):
+	channels = iota_x.shape[1]
+	p = iota_x.shape[2]
+	q = iota_x.shape[3]
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+	_, mu, logvar = model.encode(iota_x)
+	std = torch.exp(0.5 * logvar)
+	#out_encoder = encoder.forward(iota_x)
+	q_zgivenxobs = td.Independent(td.Normal(loc=mu,scale=std),1) #torch.nn.Softplus()(logvar)
+	zgivenx = q_zgivenxobs.rsample([K]).reshape(K,d) 
+	zgivenx_flat = zgivenx.reshape([K,d])
+	x_logits_e = model.decoder(zgivenx_flat)
+
+	xgivenz = td.Normal(loc = x_logits_e.reshape([-1,1]), scale = (torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1]))
+
+	full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
+	mask_ = torch.Tensor.repeat(mask,[K,1,1,1]).reshape([K,channels*p*q])
+
+	data_flat = full_.reshape([-1,1])
+	all_log_pxgivenz_flat = xgivenz.log_prob(data_flat)
+
+	#all_log_pxgivenz_flat = xgivenz.log_prob(data_flat)
+	all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K,channels*p*q])
+	#print(all_log_pxgivenz)
+	logpmissgivenz = torch.sum(all_log_pxgivenz*(~mask_),1).reshape([K,1])
+	logpxobsgivenz = torch.sum(all_log_pxgivenz*mask_,1).reshape([K,1]) 
+
+	logpz = p_z.log_prob(zgivenx).reshape([K,1])
+	logqz = q_zgivenxobs.log_prob(zgivenx).reshape([K,1])
+	iwae_bound = torch.logsumexp(logpmissgivenz + logpz - logqz, 0) ##Plots for this.
+
+	print(logpmissgivenz)
+
+	image = iota_x.to(device,dtype = torch.float)[0].reshape(1,channels,p,q) 
+	#print(image[0].shape, x_logits_e[0].shape)
+	#image[0].reshape(1,3,32,32)[~mask] = x_logits_e[0].reshape(1,3,32,32)[~mask]
+	image = x_logits_e[0].reshape(1,channels,p,q)
+
+	plot_image_svhn(np.squeeze(image.cpu().data.numpy()), results + str(-1) + "/compiled/missing-out_sampled.png" )
+	#print(torch.mean(logpmissgivenz), torch.mean(logqz-logpz))
+	#print("observed -- ", (torch.mean(logpxobsgivenz) - torch.mean(logqz - logpz)))
 	return iwae_bound
 
 def eval_iwae_bound_debug(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labels=False, labels= None, data='mnist', results=None ):
@@ -114,8 +190,7 @@ def eval_iwae_bound_debug(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, wit
 	#image[0].reshape(1,3,32,32)[~mask] = x_logits_e[0].reshape(1,3,32,32)[~mask]
 	image = x_logits_e[0].reshape(1,channels,p,q)
 
-	#plot_image_svhn(np.squeeze(image.cpu().data.numpy()), results + str(-1) + "/compiled/true-out_sampled.png" )
-
+	plot_image_svhn(np.squeeze(image.cpu().data.numpy()), results + str(-1) + "/compiled/true-out_sampled.png" )
 	#print(logpmissgivenz, logqz - logpz)
 
 	#print("observed -- ", (torch.mean(logpxobsgivenz) - torch.mean(logqz - logpz)))

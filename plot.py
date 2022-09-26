@@ -5,6 +5,7 @@ from loss import *
 #import cv2
 import matplotlib.cm as cm
 import torch.distributions as td
+from scipy.special import expit
 
 def plot_loss_vs_sample_size(mixture_loss_samples, K_samples_ ,save_directory):
 	x =  np.zeros((6,len(K_samples_)))
@@ -210,8 +211,20 @@ def plot_image_svhn(img, file='true.png', missing_pattern_x = None, missing_patt
 	#plt.subplot(121)
 	#plt.imshow(np.squeeze(img))
 	#plt.imshow(img)
-	img = (1 + img)*(255/2)
-	img = img.astype(int)
+	std = [0.2023, 0.1994, 0.2010]
+	mean = [0.4914, 0.4822, 0.4465]
+
+	#img[0,:,:] = img[0,:,:]*std[0] + mean[0]
+	#img[1,:,:] = img[1,:,:]*std[1] + mean[1]
+	#img[2,:,:] = img[2,:,:]*std[2] + mean[2]
+
+	print(np.max(img), np.min(img))
+	#img = (img)*(255)
+
+	print(np.max(img), np.min(img))
+	#exit()
+	#img = img.astype(int)
+	img = expit(img)
 	img =  np.transpose(img, (1, 2, 0))
 	plt.imshow(img)
 	if missing_pattern_x is not None: 

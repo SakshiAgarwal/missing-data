@@ -264,7 +264,6 @@ for iterations in range(1):
             img = missing.cpu().data.numpy() 
             plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" +  "missing-debug.png" )
             lower_bound +=  eval_iwae_bound_debug(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn', results=results)
-
             upper_bound +=  eval_iwae_bound_debug(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn', results=results)
 
 

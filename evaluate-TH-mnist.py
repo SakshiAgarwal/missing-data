@@ -68,6 +68,13 @@ encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
 
+
+encoder.eval()
+decoder.eval()
+encoder_updated.eval()
+encoder_updated_test.eval()
+
+
 for params in encoder.parameters():
     params.requires_grad = False
 
@@ -88,6 +95,7 @@ read_only = False #if we would only read from saved evaluations
 write_only = True
 to_plot = False
 max_samples = 2000
+
 if g_prior:
 	file_save_params = results + str(-1) + "/pickled_files/TH-params_mnist.pkl"
 	with open(file_save_params, 'rb') as file:
@@ -234,7 +242,7 @@ for data in test_loader:
 			with open(file_save_params, 'wb') as file:
 				pickle.dump([lower_bound/i, upper_bound/i, bound_updated_encoder/i, bound_updated_test_encoder/i, pseudo_gibbs_iwae/i, metropolis_within_gibbs_iwae/i, z_iwae/i, iaf_iwae/i, mixture_iwae/i , mixture_inits_iwae/i, nb], file)
 
-	if i == 1000:
+	if i == 1001:
 		break
 
 

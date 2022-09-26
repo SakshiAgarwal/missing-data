@@ -10,17 +10,19 @@ def weights_init(layer):
   if type(layer) == nn.Linear: torch.nn.init.orthogonal_(layer.weight)
    
 
-def train_VAE_uci(num_epochs, trainset, validset, ENCODER_PATH,  results, encoder, decoder, log_sigma, optimizer, p_z, device, d, DECODER_PATH=None):
+def train_VAE_uci(num_epochs, trainset, validset, ENCODER_PATH,  results, encoder, decoder, optimizer, p_z, device, d, DECODER_PATH=None, log_sigma=None):
 	encoder.apply(weights_init)
 	decoder.apply(weights_init)
 	n = len(trainset)
 	p = trainset.shape[1]
 
+	n_val = validset.shape[0]
 	bs=64
 	K=1
 	print("trainset size: ", n,p)
 	mask = np.ones((n,p))
-	
+	mask_val = np.ones((n_val,p))
+
 	for epoch in range(num_epochs):
 		train_loss = 0
 		train_log_likelihood = 0
@@ -31,17 +33,33 @@ def train_VAE_uci(num_epochs, trainset, validset, ENCODER_PATH,  results, encode
 		batches_data = np.array_split(trainset[perm,], n/bs)
 		batches_mask = np.array_split(mask[perm,], n/bs)
 
+		perm = np.random.permutation(n_val)
+		batches_data_val = np.array_split(validset[perm,], n_val/bs)
+		batches_mask_val = np.array_split(mask_val[perm,], n_val/bs)
+
 		for it in range(len(batches_data)):
-			print(log_sigma)
+			#print(log_sigma)
 			optimizer.zero_grad()
 			encoder.zero_grad()
 			decoder.zero_grad()
 			b_data = torch.from_numpy(batches_data[it]).float().cuda()
 			b_mask = torch.from_numpy(batches_mask[it]).float().cuda()
-			loss = miwae_loss(b_data,b_mask, encoder, decoder, log_sigma, d, K, p_z)
+			loss = miwae_loss(b_data,b_mask, encoder, decoder, d, K, p_z)
 			loss.backward()
 			optimizer.step()
+			train_loss += loss.item()
 
+		print("training loss : ", train_loss)
+
+		val_loss = 0
+		for it in range(len(batches_data_val)):
+			#print(log_sigma)
+			b_data_val = torch.from_numpy(batches_data_val[it]).float().cuda()
+			b_mask_val = torch.from_numpy(batches_mask_val[it]).float().cuda()
+			loss = miwae_loss(b_data_val,b_mask_val, encoder, decoder, d, K, p_z)
+			val_loss += loss.item()
+		
+		print("validation loss : ", val_loss)
 
 	torch.save({'model_state_dict': encoder.state_dict()}, ENCODER_PATH)
 	if DECODER_PATH is not None:
