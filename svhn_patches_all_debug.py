@@ -39,8 +39,8 @@ Initialize Hyperparameters
 """
 
 d = 50 #latent dim
-batch_size = 64
-learning_rate = 1e-3
+batch_size = 128
+learning_rate = 3e-4
 num_epochs = 0
 stop_early= False
 binary_data = False
@@ -52,10 +52,9 @@ num_epochs_test = 300
 ##results for beta-annealing
 #results=os.getcwd() + "/results/mnist-" + str(binary_data) + "-beta-annealing-"
 ##Results for alpha-annealing
-
 results=os.getcwd() + "/results/svhn/" 
-ENCODER_PATH = "models/svhn_e_model_"+ str(binary_data) + ".pt"  ##without 20 is d=50
-DECODER_PATH = "models/svhn_d_model_"+ str(binary_data) + ".pt"  ##simple is for simple VAE
+ENCODER_PATH = "models/svhn_encoder_anneal.pth"  ##without 20 is d=50
+DECODER_PATH = "models/svhn_decoder_anneal.pth"  ##simple is for simple VAE
 
 """
 Create dataloaders to feed data into the neural network
@@ -78,13 +77,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #encoder =  FlatWideResNet(channels=channels, size=2, levels=3, blocks_per_level=4, out_features = 2*d, shape=(p,q))
 #decoder = FlatWideResNetUpscaling(channels=channels, size=2, levels=3, blocks_per_level=4, in_features = d, shape=(p,q), model ='sigma_vae')
 
-encoder =  FlatWideResNet(channels=channels, size=1, levels=3, blocks_per_level=2, out_features = 2*d, shape=(p,q))
-decoder = FlatWideResNetUpscaling(channels=channels, size=1, levels=3, blocks_per_level=2, in_features = d, shape=(p,q), model ='sigma_vae')
+encoder =  FlatWideResNet(channels=channels, size=2, levels=3, dense_blocks=2, out_features = 2*d, activation=nn.LeakyReLU(), shape=(p,q)) #blocks_per_level=2,
+decoder = FlatWideResNetUpscaling(channels=channels, size=2, levels=3, dense_blocks=2, transpose=True, activation=nn.LeakyReLU(), in_features = d, shape=(p,q), model ='sigma_vae')
 
 encoder = encoder.cuda()
 decoder = decoder.cuda()
 print(torch.cuda.current_device())
-#print(sigma_decoder.is_leaf)
 
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=learning_rate)
 
@@ -98,25 +96,32 @@ p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cud
 best_loss, count = 0, 0
 
 if num_epochs>0:
-    encoder, decoder = train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early)
+    encoder, decoder = train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, annealing=True)
 
 ### Load model 
 checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
+#print(checkpoint)
 encoder.load_state_dict(checkpoint['model_state_dict'])
 checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
+#checkpoint['log_sigma'] = checkpoint['log_sigma'].unsqueeze(0)
+#print(decoder)
 decoder.load_state_dict(checkpoint['model_state_dict'])
 print(torch.cuda.current_device())
 print("model loaded")
 
-print(decoder.get_parameter("log_sigma"))
+encoder.eval()
+decoder.eval()
 
 file_save = results + str(-1) + "/gmms_svhn.pkl"
 
-if os.path.exists(file_save):
-    with open(file_save, 'rb') as file:
-        gm = pickle.load(file)
-else:
-    train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data='svhn')
+do_training = False
+
+if do_training:
+    if os.path.exists(file_save):
+        with open(file_save, 'rb') as file:
+            gm = pickle.load(file)
+    else:
+        train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data_='svhn')
 
 for params in encoder.parameters():
     params.requires_grad = False
@@ -126,21 +131,15 @@ for params in decoder.parameters():
 
 burn_in_period = 20
 
-mixture_loss = np.zeros((6,10,num_epochs_test))
-mixture_mse = np.zeros((6,10,num_epochs_test))
+#mixture_loss = np.zeros((6,10,num_epochs_test))
+#mixture_mse = np.zeros((6,10,num_epochs_test))
 
-
-decoder.eval()
-print(decoder.training)
-
+#print(decoder)
 ###Generate 500 samples from decoder
-for i in range(10):
-    x = generate_samples(p_z, decoder, d, L=1, data='svhn').cpu().data.numpy().reshape(1,3,32,32)  
-    plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
+#for i in range(100):
+#    x = generate_samples(p_z, decoder, d, L=1, data='svhn').cpu().data.numpy().reshape(1,3,32,32)  
+#    plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
 
-
-
-exit()
 #xm_loss = np.zeros((6,10,num_epochs_test))
 #xm_loss_per_img = np.zeros((6,10,num_epochs_test))
 #xm_mse_per_img = np.zeros((6,10,num_epochs_test))
@@ -175,9 +174,10 @@ iaf_gaussian_loss = np.zeros((num_epochs_test))
 iaf_mixture_loss =  np.zeros((num_epochs_test))
 iaf_mixture_reinits_loss =  np.zeros((num_epochs_test))
 
-K_samples = 1000
+K_samples = 100
 
 print(torch.cuda.current_device())
+
 for iterations in range(1):
     for i in [-1]:
         p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
@@ -191,7 +191,7 @@ for iterations in range(1):
         ## Right half missing (0)
         #test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, top_half=True),batch_size=1)
         ## 4 patches of size 10*10 missing (-1)
-        test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(patches=True),batch_size=1)
+        test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(top_half=True),batch_size=1)
         
         print("test data loaded")
         test_log_likelihood, test_loss, test_mse, nb, = 0, 0, 0, 0
@@ -213,7 +213,6 @@ for iterations in range(1):
         #lower_bound_all = upper_bound_all = lower_log_like_all = upper_log_like_all = lower_err = upper_err = 0
         #total_loss = 0
 
-
         lower_bound = upper_bound = bound_updated_encoder = bound_updated_test_encoder = pseudo_iwae = m_iwae = xm_iwae = xm_NN_iwae = iaf_iwae = z_iwae = mixture_iwae = mixture_iwae_inits = 0
         total_loss = 0
 
@@ -230,14 +229,14 @@ for iterations in range(1):
 
         print(device)
 
+        nb = 0
+
         for data in test_loader:
             nb += 1
             if nb==1001:
                 break
-            #if nb<20:
+            #if nb<71:
             #    continue
-            #if nb==21:
-            #    break
             
             print("Image : ", nb)
             b_data, b_mask, b_full = data
@@ -257,19 +256,43 @@ for iterations in range(1):
             random = False
 
             img = b_full.cpu().data.numpy()         ## added .data
-            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" +  "true-debug.png")
+            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" + str(nb%10) +  "true.png")
 
             missing = b_data
             missing[~b_mask] = 0.5      
             img = missing.cpu().data.numpy() 
-            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" +  "missing-debug.png" )
-            lower_bound +=  eval_iwae_bound_debug(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn', results=results)
-            upper_bound +=  eval_iwae_bound_debug(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn', results=results)
+            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" + str(nb%10) +   "missing.png" )
 
+            b_data_low = b_data
+            b_data_sample = b_data
+            b_data_low[~b_mask] = 0.5
+            x_logits_init = torch.zeros_like(b_data)
+            p_xm = td.Normal(loc = 0.5 + x_logits_init[~b_mask].reshape([-1,1]), scale =  torch.ones_like(b_data)[~b_mask].reshape([-1,1])) #.to(device,dtype = torch.float)
+            b_data_sample[~b_mask] = p_xm.sample().reshape(-1)  
+
+            channel_0 = torch.mean(b_data[:,0,:,:][b_mask[:,0,:,:]])
+            channel_1 = torch.mean(b_data[:,1,:,:][b_mask[:,1,:,:]])
+            channel_2 = torch.mean(b_data[:,2,:,:][b_mask[:,2,:,:]])
+            b_data[:,0,:,:][~b_mask[:,0,:,:]] = channel_0
+            b_data[:,1,:,:][~b_mask[:,1,:,:]] = channel_1
+            b_data[:,2,:,:][~b_mask[:,2,:,:]] = channel_2
+        
+            lower_bound +=  eval_iwae_bound(iota_x = b_data.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
+            upper_bound +=  eval_iwae_bound(iota_x = b_full.to(device,dtype = torch.float), full = b_full.reshape([1,channels,p,q]).to(device,dtype = torch.float), mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=K_samples, data='svhn')
+
+            imputation = b_data.to(device,dtype = torch.float)
+            xm_logits, out_encoder, sigma_decoder = mvae_impute_svhn(b_data.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, L=1)
+            imputation[~b_mask] = xm_logits[~b_mask]
+            plot_image_svhn(np.squeeze(imputation.cpu().data.numpy()), results + str(i) + "/compiled/"  + str(nb%10) + "-miss-imputation.png" )
+
+            #imputation_ = b_data.to(device,dtype = torch.float)
+            #xm_logits, out_encoder, sigma_decoder = mvae_impute_svhn( b_full.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, L=1)
+            #imputation_[~b_mask] = xm_logits[~b_mask]
+            #plot_image_svhn(np.squeeze(imputation_.cpu().data.numpy()), results + str(i) + "/compiled/"  + "-true-imputation.png" )
 
             print("Lower IWAE bound (0's) : ", lower_bound)
             print("Upper IWAE bound (true image) : ", upper_bound)
-            exit()
+
             if random: 
                 x_logits_init = torch.zeros_like(b_data)
                 p_x_m = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_init[~b_mask]),1)
@@ -307,7 +330,7 @@ for iterations in range(1):
                     plot_image_svhn(np.squeeze(sampled_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + "-burn-in.png" )
                 else:
                     burn_in_image = b_data.to(device,dtype = torch.float)
-                    burn_in_image[~b_mask] = torch.sigmoid(x_logits_init)[~b_mask].to(device,dtype = torch.float)
+                    burn_in_image[~b_mask] = x_logits_init[~b_mask].to(device,dtype = torch.float)
                     plot_image_svhn(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + "-burn-in.png" )
          
             start_pg = datetime.now()
@@ -320,8 +343,8 @@ for iterations in range(1):
 
             #Impute image with pseudo-gibbs
             pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
-            pseudo_gibbs_image[~b_mask] = torch.sigmoid(x_logits_pseudo_gibbs[~b_mask])
-            plot_image_svhn(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' + "pseudo-gibbs.png" )
+            pseudo_gibbs_image[~b_mask] = x_logits_pseudo_gibbs[~b_mask]
+            plot_image_svhn(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/compiled/" +  str(nb%10) + "pseudo-gibbs.png" )
 
             ##M-with-gibbs sampler
             start_m = datetime.now()
@@ -333,11 +356,10 @@ for iterations in range(1):
             metropolis_gibbs_sample.append(sample)
             m_iwae +=iwae
 
-            
             #Impute image with metropolis-within-pseudo-gibbs
             metropolis_image = b_data.to(device,dtype = torch.float)
-            metropolis_image[~b_mask] = torch.sigmoid(x_full_logits[~b_mask])
-            plot_image_svhn(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/images/" + str(nb%10) + "/" + str(iterations) + '-' +"metropolis-within-pseudo-gibbs.png" )
+            metropolis_image[~b_mask] = x_full_logits[~b_mask]
+            plot_image_svhn(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/compiled/" + str(nb%10) + "metropolis-within-pseudo-gibbs.png" )
 
             dd = False
 
@@ -389,25 +411,34 @@ for iterations in range(1):
                 xm_loss_NN[iterations, nb%10, : ] = xm_nelbo_
                 xm_mse_NN[iterations, nb%10, : ] = xm_error_
 
-            b_data[~b_mask] = 0
+                b_data[~b_mask] = 0
+
             if iterations==-1:
                 z_init =  encoder.forward(b_full.to(device,dtype = torch.float))
             else:
                 z_init =  encoder.forward(b_data.to(device,dtype = torch.float))
 
             start_iaf = datetime.now()
-            xm_nelbo_, xm_error_, iwae, t1, t2 = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, data='svhn', p_z_eval = p_z_eval )
+            channel_0 = torch.mean(b_data[:,0,:,:][b_mask[:,0,:,:]])
+            channel_1 = torch.mean(b_data[:,1,:,:][b_mask[:,1,:,:]])
+            channel_2 = torch.mean(b_data[:,2,:,:][b_mask[:,2,:,:]])
+            b_data[:,0,:,:][~b_mask[:,0,:,:]] = channel_0
+            b_data[:,1,:,:][~b_mask[:,1,:,:]] = channel_1
+            b_data[:,2,:,:][~b_mask[:,2,:,:]] = channel_2
+
+
+            xm_nelbo_, xm_error_, iwae, t1, t2, params_ = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, data='svhn', p_z_eval = p_z_eval, with_gaussian=True )
             end_iaf = datetime.now()
             diff_iaf = end_iaf - start_iaf
             print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())
             #print(t1.state_dict())
-            iaf_params.append([t1.state_dict(), t2.state_dict()])
+            iaf_params.append([t1.state_dict(), t2.state_dict(), params_])
             #print(t1.state_dict())
             iaf_iwae += iwae
             iaf_loss += xm_nelbo_
             iaf_mse += xm_error_
 
-            b_data[~b_mask] = 0
+            #b_data[~b_mask] = 0
             if iterations==-1:
                 z_init =  encoder.forward(b_full.to(device,dtype = torch.float))
             else:
@@ -434,8 +465,8 @@ for iterations in range(1):
             z_nelbo_, z_error_, iwae, logits, means, scales = optimize_mixture(num_epochs = num_epochs_test, p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float),  b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples, data='svhn')
             end_mix = datetime.now()
             diff_mix = end_mix - start_mix
-            print("Time taken for optimizing mixtures : ", diff_mix.total_seconds())
-            mixture_iwae_inits +=iwae
+            print("Time taken for optimizing mixtures (re-inits): ", diff_mix.total_seconds())
+            mixture_iwae_inits += iwae
             mixture_loss_inits += z_nelbo_
             mixture_mse += z_error_
             mixture_params_inits.append([logits, means, scales])
@@ -443,6 +474,7 @@ for iterations in range(1):
             #print(logits, means, scales)
             #Without re-inits
             start_mix = datetime.now()
+
             z_nelbo_, z_error_, iwae, logits, means, scales = optimize_mixture(num_epochs = num_epochs_test, p_z = p_z, b_data = b_data.to(device,dtype = torch.float), b_full = b_full.to(device,dtype = torch.float),  b_mask = b_mask.to(device,dtype = torch.bool), encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb , K_samples = K_samples, data='svhn', do_random=False)
             end_mix = datetime.now()
             diff_mix = end_mix - start_mix
@@ -451,21 +483,19 @@ for iterations in range(1):
             mixture_loss += z_nelbo_
             mixture_params.append([logits, means, scales])
             
-            #print(logits, means, scales)
-
             prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
 
             prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
 
             print(lower_bound/nb, upper_bound/nb, bound_updated_encoder/nb, pseudo_iwae/nb, m_iwae/nb,  xm_iwae/nb,  xm_NN_iwae/nb,  iaf_iwae/nb, z_iwae/nb, mixture_iwae/nb, mixture_iwae_inits/nb) #added mixture_iwae_inits later
 
-            file_save_params = results + str(-1) + "/pickled_files/params_svhn_patches.pkl"
+            file_save_params = results + str(-1) + "/pickled_files/params_svhn_TH.pkl"
 
             with open(file_save_params, 'wb') as file:
                 pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
-                #pickle.dump([iaf_gaussian_params, iaf_mixture_params ,iaf_mixture_params_re_inits ,nb], file)
+            #pickle.dump([iaf_gaussian_params, iaf_mixture_params ,iaf_mixture_params_re_inits ,nb], file)
 
-            file_loss = results + str(-1) + "/pickled_files/loss_svhn_patches.pkl"
+            file_loss = results + str(-1) + "/pickled_files/loss_svhn_TH.pkl"
             with open(file_loss, 'wb') as file:
                 pickle.dump([z_loss, mixture_loss_inits, mixture_loss, iaf_loss,  nb], file)
                 #pickle.dump([iaf_gaussian_loss, iaf_mixture_loss, iaf_mixture_reinits_loss, nb], file)

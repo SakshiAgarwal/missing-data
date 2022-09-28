@@ -5,7 +5,6 @@ from sklearn.mixture import GaussianMixture
 from sklearn.manifold import TSNE
 import pickle
 
-
 def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data_='mnist', with_labels=False):
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

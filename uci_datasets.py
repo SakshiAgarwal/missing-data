@@ -1,4 +1,4 @@
-cuda_n=2
+cuda_n=1
 import os
 from numba import cuda
 cuda.select_device(cuda_n)
@@ -42,7 +42,7 @@ Initialize Hyperparameters
 
 batch_size = 64
 learning_rate = 1e-3
-num_epochs = 2002 #2002
+num_epochs = 0 #2002
 K=1
 num_epochs_test = 300
 dataset='banknote'
@@ -115,9 +115,9 @@ if num_epochs>0:
     encoder, decoder = train_VAE_uci(num_epochs, trainset, validset, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, DECODER_PATH = DECODER_PATH)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH, map_location='cuda:2')
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH, map_location='cuda:2')
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
 #checkpoint = torch.load(ENCODER_PATH_UPDATED)
@@ -171,7 +171,7 @@ iaf_mixture_reinits_loss =  np.zeros((num_epochs_test))
 #term2 = np.zeros((6, 10, num_epochs_test))  #KL
 #term3 = np.zeros((6, 10, num_epochs_test))  #Entropy
 
-K_samples_ = [1000] #100, 500, 2000
+K_samples_ = [100] #100, 500, 2000
 #mixture_loss_samples = np.zeros((2,6,len(K_samples_)))
 
 samples_iter = -1
@@ -399,7 +399,7 @@ for K_samples in K_samples_ :
                     z_init =  encoder.forward(b_data.to(device,dtype = torch.float))
 
                 start_iaf = datetime.now()
-                xm_nelbo_, xm_error_, iwae, t1, t2 = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, p_z_eval = p_z_eval)
+                xm_nelbo_, xm_error_, iwae, t1, t2 = optimize_IAF_table(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, p_z_eval = p_z_eval)
                 end_iaf = datetime.now()
                 diff_iaf = end_iaf - start_iaf
                 print("Time taken for optimizing IAF : ", diff_iaf.total_seconds())

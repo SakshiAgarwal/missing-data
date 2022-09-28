@@ -41,7 +41,7 @@ def burn_in_table(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20):
 
 	return x_logits, b_data
 
-def burn_in_svhn(b_data, b_mask, model, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
+def burn_in_svhn_trash(b_data, b_mask, model, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
 	channels = b_data.shape[1]
 	p = b_data.shape[2]
 	q = b_data.shape[3]
@@ -57,10 +57,11 @@ def burn_in_svhn(b_data, b_mask, model, p_z, d, burn_in_period=20, data='mnist',
 
 	return x_logits, b_data,  mu, std
 
-def burn_in_svhn_prev(b_data, b_mask, model, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
+def burn_in_svhn(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20, data='mnist', with_labels=False):
 	channels = b_data.shape[1]
 	p = b_data.shape[2]
 	q = b_data.shape[3]
+
 	if data=='mnist':
 		x_logits = torch.log(b_data/(1-b_data)).reshape(1,channels,p,q)
 	else:
@@ -676,9 +677,20 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 	if data=='mnist':
 		p_xm = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_init[~b_mask]),1)
 	else:
-		p_xm = td.Normal(loc = x_logits_init[~b_mask].reshape([-1,1]), scale =  torch.ones_like(b_data)[~b_mask].reshape([-1,1])) #.to(device,dtype = torch.float)
+		channel_0 = torch.mean(b_data[:,0,:,:][b_mask[:,0,:,:]])
+		channel_1 = torch.mean(b_data[:,1,:,:][b_mask[:,1,:,:]])
+		channel_2 = torch.mean(b_data[:,2,:,:][b_mask[:,2,:,:]])
 
-	#b_data_[~b_mask_] = p_xm.sample([num_components]).reshape(-1)  
+		p_xm = td.Normal(loc = 0.5 + x_logits_init[~b_mask].reshape([-1,1]), scale =  torch.ones_like(b_data)[~b_mask].reshape([-1,1])) #.to(device,dtype = torch.float)
+		#b_data_[~b_mask] = 0.5
+		b_data[:,0,:,:][~b_mask[:,0,:,:]] = channel_0
+		b_data[:,1,:,:][~b_mask[:,1,:,:]] = channel_1
+		b_data[:,2,:,:][~b_mask[:,2,:,:]] = channel_2
+		b_data_ = torch.Tensor.repeat(b_data,[num_components,1,1,1])  
+		
+
+		#b_data_[~b_mask_] = p_xm.sample([num_components]).reshape(-1)  
+
 	out_encoder = encoder.forward(b_data_)
 
 	logits = torch.zeros(batch_size, num_components)
@@ -696,6 +708,7 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 	sigma = torch.Tensor.repeat(sigma.reshape(batch_size, num_components, 1), [1,1,d])
 
 	means +=  (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 
+
 	#means +=  torch.mul(scales.exp(), (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 )# Add random noise between [-1,1]
 	#scales = -1*torch.ones(batch_size, num_components, d)
 

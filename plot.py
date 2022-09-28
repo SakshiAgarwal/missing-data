@@ -152,8 +152,9 @@ def display_images_svhn(decoder, p_z, d, file, k = 50):
 		fig.add_subplot(rows, columns, i+1)
 		# showing image
 		x = generate_samples(p_z, decoder, d, L=1, data = "svhn").cpu().data.numpy().reshape(3,32,32)  
-		x = (255/2)*(1 + x)
-		x = x.astype(int)
+		#x = (255/2)*(1 + x)
+		x = expit(x)
+		#x = x.astype(int)
 		x = np.transpose(x, (1, 2, 0))
 		plt.imshow(x)
 		plt.axis('off')
@@ -224,8 +225,10 @@ def plot_image_svhn(img, file='true.png', missing_pattern_x = None, missing_patt
 	#exit()
 	#img = img.astype(int)
 	img = expit(img)
+
 	img =  np.transpose(img, (1, 2, 0))
 	plt.imshow(img)
+
 	if missing_pattern_x is not None: 
 		plt.scatter(missing_pattern_y, missing_pattern_x)
 

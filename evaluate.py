@@ -1,10 +1,10 @@
 import os
 from numba import cuda
-cuda.select_device(2)
+cuda.select_device(1)
 print(cuda.current_context().get_memory_info())
-os.environ['CUDA_LAUNCH_BLOCKING'] = '2'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import torch
-torch.cuda.set_device(2)
+torch.cuda.set_device(1)
 print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -57,15 +57,15 @@ decoder = decoder.cuda()
 encoder_updated = encoder_updated.cuda()
 encoder_updated_test = encoder_updated_test.cuda()
 
-checkpoint = torch.load(ENCODER_PATH, map_location='cuda:2')
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH, map_location='cuda:2')
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:2')
+checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:1')
 encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:2')
+checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:1')
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
 
 
@@ -88,7 +88,7 @@ for params in decoder.parameters():
 
 ##Load parameters --
 g_prior = False
-read_only = False #if we would only read from saved evaluations
+read_only = True #if we would only read from saved evaluations
 write_only = True
 to_plot = False
 max_samples = 2000
@@ -102,12 +102,18 @@ with open(file_save_params, 'rb') as file:
 	[pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb] = pickle.load(file)
 
 if read_only:
-	with open(results + str(-1) + "/pickled_files/infered_iwae_p_gaussian.pkl", 'rb') as file:
-		[lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae, nb] = pickle.load(file)
+	if g_prior:
+		with open(results + str(-1) + "/pickled_files/infered_iwae_p_gaussian.pkl", 'rb') as file:
+			[lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae, nb] = pickle.load(file)
+		file_name = "/compiled/IWAEvsSamples.png"
+	else:
+		with open(results + str(-1) + "/pickled_files/infereed_iwae_p_mixture.pkl", 'rb') as file:
+			[lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae, nb] = pickle.load(file)
+		file_name = "/compiled/IWAEvsSamples_mixture.png"
 	x = np.arange(max_samples)
 	colours = ['g', 'b', 'y', 'r', 'k', 'c']
 
-	compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae,  colours, x, "Estimated log-likelihood for missing pixels", results + str(-1) + "/compiled/IWAEvsSamples.png", ylim1= None, ylim2 = None)
+	compare_iwae(lower_bound, upper_bound, bound_updated_encoder, bound_updated_test_encoder, pseudo_gibbs_iwae, metropolis_within_gibbs_iwae, z_iwae, iaf_iwae, mixture_iwae , mixture_inits_iwae,  colours, x, "Estimated log-likelihood for missing pixels", results + str(-1) + file_name, ylim1= None, ylim2 = None)
 	exit()
 
 test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, patches=True),batch_size=1)

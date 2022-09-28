@@ -23,7 +23,7 @@ def eval_iwae_bound_table(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, wit
 
 	logpz = p_z.log_prob(zgivenx).reshape([K,1])
 	logqz = q_zgivenxobs.log_prob(zgivenx).reshape([K,1])
-	
+
 	out_decoder = decoder(zgivenx_flat)
 
 	all_means_obs_model = out_decoder[..., :p]
@@ -722,7 +722,7 @@ def optimize_mixture_IAF_table(num_epochs, p_z, logits, means, scales, b_data, b
 	return z_loss, z_mse, -iwae_loss,  autoregressive_nn, autoregressive_nn2
 
 
-def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, encoder, decoder, device, d, results, iterations, nb, K_samples, data='mnist', sampled_image_o =None, p_z_eval = None, with_gaussian=False,  return_imputation=False):
+def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, encoder, decoder, device, d, results, iterations, nb, K_samples, p_z_eval = None, with_gaussian=False,  return_imputation=False):
 
 	autoregressive_nn =  AutoRegressiveNN(d, [8, 8]).cuda()
 	autoregressive_nn2 =  AutoRegressiveNN(d, [8, 8]).cuda()
@@ -734,7 +734,6 @@ def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, enco
 	z_params =  encoder.forward(b_data.to(device,dtype = torch.float))
 
 	#print(torch.cuda.current_device())
-
 	i=-1
 
 	z_params = z_params.to(device)
@@ -743,9 +742,6 @@ def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, enco
 	if with_gaussian:
 		z_params.requires_grad = True
 		test_optimizer_z = torch.optim.Adam([z_params], lr=0.1, betas=(0.9, 0.999)) #0.1
-
-	if data=='svhn':
-		sigma_decoder = decoder.get_parameter("log_sigma")
 
 	optimizer_iaf = torch.optim.Adam(list(autoregressive_nn.parameters()) + list(autoregressive_nn2.parameters()), lr=0.01)
 	
@@ -759,11 +755,11 @@ def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, enco
 	a = int(num_epochs/4)
 	prefix = results 
 
-	do_plot = False
+	do_plot = True
 	for k in range(num_epochs):       
 		#print("In IAF----")  
 
-		loss, log_like, aa, bb, flow_dist = z_loss_table(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, z_params = z_params, encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2)
+		loss, log_like, aa, bb, flow_dist = z_loss_table(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z, z_params = z_params, encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2)
 
 		#z_kl_loss[iterations, nb%10, k] = bb.item()
 		#z_loglike_loss[iterations, nb%10, k] = aa.item()
@@ -790,20 +786,14 @@ def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, enco
 				zgivenx_flat = zgivenx.reshape([1,d])
 				all_logits_obs_model = decoder.forward(zgivenx_flat)
 
-				if data=='mnist':
-					imputation[~b_mask] = torch.sigmoid(all_logits_obs_model)[~b_mask]
-				else:
-					imputation[~b_mask] = all_logits_obs_model[~b_mask]
+				imputation[~b_mask] = all_logits_obs_model[:,:p][~b_mask]
 
 				img = imputation.cpu().data.numpy()
-				err = np.array([mse(img.reshape([1,channels,p,q]),b_full.cpu().data.numpy(),b_mask.cpu().data.numpy().astype(bool))])
+				err = np.array([mse(img.reshape([1,p]),b_full.cpu().data.numpy(),b_mask.cpu().data.numpy().astype(bool))])
 				z_mse[k] = err
 
 				if (k)%a==0 or k ==0:
-					if data=='mnist':
-						plot_image(np.squeeze(img), prefix + str(k) + "iafz.png")
-					else:
-						plot_image_svhn(np.squeeze(img), prefix + str(k) + "iafz.png")
+					print(imputation)
 
 	for params in autoregressive_nn.parameters():
 		params.requires_grad = False
@@ -815,11 +805,14 @@ def optimize_IAF_table(num_epochs, z_params, b_data,  b_mask , b_full, p_z, enco
 		z_params.requires_grad = False
 
 	iwae_loss = 0
-	iwae_loss, log_like, aa, bb, flow_dist = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z_eval, z_params = z_params,  encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2, evaluate=True,full= b_full.to(device,dtype = torch.float))
+	iwae_loss, log_like, aa, bb, flow_dist = z_loss_table(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z_eval, z_params = z_params,  encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1,iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2, evaluate=True,full= b_full.to(device,dtype = torch.float))
 
-	print("IWAE Loss for IAF", -iwae_loss)
+	
+	print("IWAE bound for IAF", -iwae_loss)
+	do_plot = False
+
 	if do_plot:
-		iwae_loss, log_like, aa, bb, flow_dist = z_loss_(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z_eval, z_params = z_params,  encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, data=data, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2, evaluate=True,full= b_full.to(device,dtype = torch.float))
+		iwae_loss, log_like, aa, bb, flow_dist = z_loss_table(iota_x = b_data.to(device,dtype = torch.float), mask = b_mask, p_z = p_z_eval, z_params = z_params,  encoder = encoder, decoder = decoder , device = device, d=d, K=K_samples, K_z=1, iaf=True, autoregressive_nn = autoregressive_nn, autoregressive_nn2= autoregressive_nn2, evaluate=True,full= b_full.to(device,dtype = torch.float))
 
 		print("IWAE Loss for IAF", -iwae_loss)
 		if data=='mnist':

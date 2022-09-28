@@ -283,7 +283,7 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 			b_mask = b_mask.to(device,dtype = torch.float)
 			# calculate mvae loss
 			batch_size = b_data.shape[0]
-			
+
 			if annealing:
 				loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z= p_z, d=d, K=1, alpha=alpha)
 			else:
@@ -338,7 +338,12 @@ def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_P
 				b_data_val = b_data_val.to(device,dtype = torch.float)
 				b_mask_val = b_mask_val.to(device,dtype = torch.float)
 				batch_size = b_data_val.shape[0]
-				loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data_val,mask = b_mask_val,encoder = encoder, decoder = decoder, p_z= p_z, d=d, K=1, alpha=1)
+
+				if annealing:
+					loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data_val,mask = b_mask_val,encoder = encoder, decoder = decoder, p_z= p_z, d=d, K=1, alpha=alpha)
+				else:
+					loss, _ , k_l, loglike  = mvae_loss_svhn(iota_x = b_data_val,mask = b_mask_val,encoder = encoder, decoder = decoder, p_z= p_z, d=d, K=1, alpha=1)
+
 				val_log_likelihood += float(loglike)
 				val_loss += float(loss)
 

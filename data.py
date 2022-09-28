@@ -132,8 +132,8 @@ class SVHN_Test(Dataset):
 		xmiss_flat = xmiss.flatten()
 
 		if patches: 
-			num_patches = 2
-			patch_size = 10
+			num_patches = 1 #2
+			patch_size = 15
 
 			#miss_pattern_x = [np.random.choice((self.p - patch_size), num_patches, replace=False) for i in range(self.n)]
 			#miss_pattern_y = [(i)*self.p*self.q + self.p*np.random.choice((self.p-patch_size), num_patches, replace=False) for i in range(self.n)]
@@ -154,6 +154,16 @@ class SVHN_Test(Dataset):
 
 			#xmiss = xmiss_flat.reshape([self.n,self.channels,self.p,self.q])
 			mask = np.isfinite(xmiss).astype(np.bool)  # False indicates missing, True indicates observed
+			xhat_0 = np.copy(self.images).astype(np.float)
+			xhat_0[~mask] = 0
+
+		if top_half:
+			mask = np.zeros((1,3,32,32))
+			mask[:,: ,int(32/2):,:] = 1
+			##Right half missing : mask[:,:14] = 1
+			##Bottom half missing : mask[:14,:] = 1
+			mask = mask.astype(np.bool)
+			mask = np.tile(mask, (self.n,1,1,1))
 			xhat_0 = np.copy(self.images).astype(np.float)
 			xhat_0[~mask] = 0
 
@@ -399,7 +409,7 @@ def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = Fa
 	valid_sampler = SubsetRandomSampler(valid_idx)
 
 	train_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(train_dataset, patches=ispatches, top_half=top_half, return_labels = return_labels),batch_size=batch_size, sampler=train_sampler)
-	valid_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(valid_dataset, patches =ispatches, top_half=top_half, return_labels = return_labels),batch_size=1, sampler=valid_sampler)
+	valid_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(valid_dataset, patches =ispatches, top_half=top_half, return_labels = return_labels),batch_size=batch_size, sampler=valid_sampler)
 	return train_loader, valid_loader
 
 def get_sample_digit(data_dir, digit, file):
@@ -439,7 +449,7 @@ def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data
 	#normalize = transforms.Normalize((0.5), (0.5))
 
 	train_dataset = datasets.SVHN(root=data_dir, split='train', download=True, transform=transforms.ToTensor())
-	valid_dataset = datasets.SVHN(root=data_dir, split='test',  download=True, transform=transforms.ToTensor())
+	valid_dataset = datasets.SVHN(root=data_dir, split='train',  download=True, transform=transforms.ToTensor())
 
 	if binary_data:
 		train_dataset.data[train_dataset.data<127]=0.0
@@ -475,10 +485,25 @@ def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data
 	#train_sampler = SubsetRandomSampler(train_idx)
 	#valid_sampler = SubsetRandomSampler(valid_idx)
 
-	print(len(train_dataset))
+	num_train = len(train_dataset)
+	print(num_train)
+	indices = list(range(num_train))
+	split = int(np.floor(valid_size * num_train))
+	np.random.seed(1234)
+	np.random.shuffle(indices)
 
-	train_loader = torch.utils.data.DataLoader(dataset=SVHM(train_dataset),batch_size=batch_size)
-	valid_loader = torch.utils.data.DataLoader(dataset=SVHM(valid_dataset),batch_size=1)
+	train_idx, valid_idx = indices[split:], indices[:split]
+
+	train_sampler = SubsetRandomSampler(train_idx)
+	valid_sampler = SubsetRandomSampler(valid_idx)
+
+	train_loader = torch.utils.data.DataLoader(dataset=SVHM(train_dataset), batch_size=batch_size, sampler=train_sampler)
+	valid_loader = torch.utils.data.DataLoader(dataset=SVHM(valid_dataset), batch_size=batch_size, sampler=valid_sampler)
+
+	print("length of train set", len(train_dataset))
+
+	#train_loader = torch.utils.data.DataLoader(dataset=SVHM(train_dataset),batch_size=batch_size)
+	#valid_loader = torch.utils.data.DataLoader(dataset=SVHM(valid_dataset),batch_size=1)
 
 	#print(len(train_loader.dataset), len(valid_loader.dataset))
 	

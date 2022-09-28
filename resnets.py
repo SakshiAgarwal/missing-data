@@ -193,10 +193,12 @@ class UpscaleBlock(ResidualBlock):
             self.layer_1 = SN(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, 1, output_padding=stride - 1))
         else:
             self.layer_1 = SN(nn.Conv2d(in_channels, out_channels, kernel_size, 1, 1))
+
         if transpose:
             self.layer_2 = SN(nn.ConvTranspose2d(out_channels, out_channels, kernel_size, 1, 1))
         else:
             self.layer_2 = SN(nn.Conv2d(out_channels, out_channels, kernel_size, 1, 1))
+            
         self.shortcut = SN(nn.Conv2d(in_channels, out_channels, 1, 1))# if stride > 1 or in_channels != out_channels else nn.Identity()
         self.upsample = nn.Upsample(scale_factor=stride) if stride > 1 or in_channels != out_channels else nn.Identity()
         self.bn_1 = BatchNorm2d(in_channels) if bn else nn.Identity()
@@ -466,8 +468,10 @@ class FlatWideResNet(nn.Module):
         if avg_pool:
             features = 8 * size * (2 ** levels)
             self.flatten = GlobalPool2d()
+
         self.dense_blocks = nn.ModuleList(
             [DenseBlock(dense_units, dense_units, activation, residual=True, bn=False) for i in range(dense_blocks)])
+
         if dense_blocks:
             self.dense_blocks.insert(0, nn.Linear(features + label_dims, dense_units))
             self.output_layer = nn.Linear(dense_units, out_features)

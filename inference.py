@@ -183,7 +183,13 @@ def pseudo_gibbs(sampled_image, b_data, b_mask, encoder, decoder, p_z,  d, resul
 
 	for l in range(T):
 		out_encoder = encoder.forward(sampled_image)
-		q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+
+		if data=='mnist':
+			q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+		else:
+			scales_z = 1e-2 + torch.nn.Softplus()(out_encoder[...,d:])
+			q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=scales_z),1)
+
 		zgivenx = q_zgivenxobs.rsample([K])
 
 		if with_labels:
@@ -203,7 +209,8 @@ def pseudo_gibbs(sampled_image, b_data, b_mask, encoder, decoder, p_z,  d, resul
 			#xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(probs = a.reshape(-1)),1)
 		else:
 			sigma_decoder = decoder.get_parameter("log_sigma")
-			xgivenz = td.Normal(loc = x_logits.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*x_logits.shape).cuda()).reshape([-1,1]))
+			scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
+			xgivenz = td.Normal(loc = x_logits.reshape([-1,1]), scale =  scales_z*(torch.ones(*x_logits.shape).cuda()).reshape([-1,1]))
 
 		#all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,28*28])
 		#logpxobsgivenz = torch.sum(all_log_pxgivenz,1).reshape([K,batch_size])
@@ -490,7 +497,13 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 		x_prev = iota_x[~mask]
 	#z_prev = p_z.rsample([1])
 	out_encoder = encoder.forward(iota_x)
-	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+
+	if data=='mnist':
+		q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+	else:
+		scales_z = 1e-2 + torch.nn.Softplus()(out_encoder[...,d:])
+		q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=scales_z),1)
+
 	z_prev = q_zgivenxobs.rsample([K])
 
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -509,14 +522,19 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 	logqz_evaluate = torch.zeros((T,1)).to(device,dtype = torch.float)
 
 	for t in range(T):
-
 		if with_labels:
 			iota_x[0,0,:,:].reshape([1,1,28,28])[~mask] = x_prev
 		else:
 			iota_x[~mask] = x_prev
 
 		out_encoder = encoder.forward(iota_x)
-		q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+
+		if data=='mnist':
+			q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=torch.nn.Softplus()(out_encoder[...,d:])),1)
+		else:
+			scales_z = 1e-2 + torch.nn.Softplus()(out_encoder[...,d:])
+			q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=scales_z),1)
+
 
 		z_t = q_zgivenxobs.rsample([K])
 		zgivenx_evaluate[t] = z_t
@@ -557,8 +575,9 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 			all_log_pxgivenz_flat_prev = td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model_prev.reshape([-1,1])).log_prob(data_flat)
 		else:
 			sigma_decoder = decoder.get_parameter("log_sigma")
-			all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
-			all_log_pxgivenz_flat_prev = td.Normal(loc = all_logits_obs_model_prev.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+			scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
+			all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale =  scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+			all_log_pxgivenz_flat_prev = td.Normal(loc = all_logits_obs_model_prev.reshape([-1,1]), scale =  scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
 
 		if with_labels:
 			channels=1
@@ -581,7 +600,8 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 		if data=='mnist':
 			xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model),1)
 		else:
-			xgivenz = td.Normal(loc = all_logits_obs_model, scale =  sigma_decoder.exp()*(torch.ones(*all_logits_obs_model.shape).cuda()))
+			scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
+			xgivenz = td.Normal(loc = all_logits_obs_model, scale =  scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()))
 
 		#xgivenz = td.Independent(td.bernoulli.Bernoulli(logits=all_logits_obs_model),1)
 
@@ -611,7 +631,8 @@ def m_g_sampler(iota_x, full, mask, encoder, decoder, p_z, d, results, nb, itera
 			if data=='mnist':
 				xgivenz_prev = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model_prev),1)
 			else:
-				xgivenz_prev = td.Normal(loc = all_logits_obs_model_prev, scale =  sigma_decoder.exp()*(torch.ones(*all_logits_obs_model_prev.shape).cuda()))
+				scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
+				xgivenz_prev = td.Normal(loc = all_logits_obs_model_prev, scale =  scales_z*(torch.ones(*all_logits_obs_model_prev.shape).cuda()))
 
 			x_prev = xgivenz_prev.sample().reshape(batch_size,channels,p,q)[~mask]
 
@@ -1653,7 +1674,7 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 	num_components = 10
 
 	b_data[~b_mask] = 0
-	r1 = -1
+	r1 = 0
 	r2 = 1
 	#print(b_data.shape, type(b_data)) 
 
@@ -1668,7 +1689,12 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 		for comp in range(num_components):
 			probs = torch.zeros(batch_size, num_components)
 			probs[0,comp] = 1.0
-			dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means, scales.exp()), 1))
+
+			if data == 'mnist':
+				dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means, scales.exp()), 1))
+			else:
+				dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means.detach(), 1e-2 +  torch.nn.Softplus()(scales).detach()), 1))
+
 			#print(dist.sample([50]).cpu().data.numpy(), dist.sample([50]).cpu().data.numpy().shape)
 			a = dist.sample([50])
 			comp_samples[comp] = a.cpu().data.numpy().reshape([50,d]) 
@@ -1848,16 +1874,20 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 	
 	comp_samples = 0
 	
-	do_plot=False
+	do_plot=True
 	if do_plot:
 		comp_samples = np.zeros((num_components+2,50,d))
 		for comp in range(num_components):
 			probs = torch.zeros(batch_size, num_components)
 			probs[0,comp] = 1.0
-			dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means.detach(), scales.exp().detach()), 1))
+			if data == 'mnist':
+				dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means.detach(), scales.exp().detach()), 1))
+			else:
+				dist = td.MixtureSameFamily(td.Categorical(probs=probs.to(device,dtype = torch.float)), td.Independent(td.Normal(means.detach(), 1e-2 +  torch.nn.Softplus()(scales).detach()), 1))
+
 			#print(dist.sample([50]).cpu().data.numpy(), dist.sample([50]).cpu().data.numpy().shape)
 			comp_samples[comp] = dist.sample([50]).cpu().data.numpy().reshape([50,d])
-			display_images(decoder, dist, d, results + str(i) + "/compiled/components/" + str(do_random) + str(nb%10)  + str(iterations)  + '-component' + str(comp) + 'mixture.png', k = 50, data=data)
+			display_images(decoder, dist, d, results + str(i) + "/compiled/components/" + str(do_random) + str(nb%10)  + str(iterations)  + '-component' + str(comp) + '.png', k = 50, data=data)
 		
 		#if data== 'mnist':
 		#	comp_samples[num_components] =  out_7[...,:d].cpu().data.numpy().reshape([50,d]) 
@@ -1882,12 +1912,15 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 		#prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
 		#plot_images_in_row(num_epochs, loc1 =  prefix +str(0) + "mixture.png", loc2 =  prefix +str(a) + "mixture.png", loc3 =  prefix +str(2*a) + "mixture.png", loc4 =  prefix +str(3*a) + "mixture.png", loc5 =  prefix +str(4*a) + "mixture.png", file =  prefix + "mixture-all.png", data=data) 
 
-		q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
+		#q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
 
 		if data=='mnist':
+			q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
 			display_images(decoder, q_z, d, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + str(do_random)+'mixture.png', k = 50, b_data = b_data, b_mask=b_mask)
 		else:
+			q_z = ReparameterizedNormalMixture1d(logits, means, 1e-2 +  torch.nn.Softplus()(scales))
 			display_images_svhn(decoder, q_z, d, results  + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + str(do_random) +'mixture.png', k = 50)
+
 
 	del test_optimizer, test_optimizer_logits, scheduler, scheduler_logits, comp_samples
 
