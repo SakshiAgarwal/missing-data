@@ -1,4 +1,4 @@
-cuda_n=1
+cuda_n=3
 import os
 from numba import cuda
 cuda.select_device(cuda_n)
@@ -99,10 +99,10 @@ if num_epochs>0:
     encoder, decoder = train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, annealing=True)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:3')
 #print(checkpoint)
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:3')
 #checkpoint['log_sigma'] = checkpoint['log_sigma'].unsqueeze(0)
 #print(decoder)
 decoder.load_state_dict(checkpoint['model_state_dict'])
@@ -112,9 +112,12 @@ print("model loaded")
 encoder.eval()
 decoder.eval()
 
-file_save = results + str(-1) + "/gmms_svhn.pkl" ##change for gabe
+file_save = results + str(-1) + "/gmms_svhn.pkl"
 
 do_training = True
+
+train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_save, data_='svhn')
+exit()
 
 if do_training:
     if os.path.exists(file_save):
@@ -133,6 +136,7 @@ burn_in_period = 20
 
 #mixture_loss = np.zeros((6,10,num_epochs_test))
 #mixture_mse = np.zeros((6,10,num_epochs_test))
+
 #print(decoder)
 ###Generate 500 samples from decoder
 #for i in range(100):
@@ -182,11 +186,13 @@ for iterations in range(1):
         #p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
         #p_z_eval = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
 
+
         means_ = torch.from_numpy(gm.means_)
         std_ = torch.sqrt(torch.from_numpy(gm.covariances_))
         weights_ = torch.from_numpy(gm.weights_)
         p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
         p_z_eval = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
+
 
         ### Get test loader for different missing percentage value
         #print("memory before --" )
@@ -196,7 +202,8 @@ for iterations in range(1):
         ## Right half missing (0)
         #test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, top_half=True),batch_size=1)
         ## 4 patches of size 10*10 missing (-1)
-        test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(top_half=True),batch_size=1)
+        #test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(top_half=True),batch_size=1)
+        test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(patches=True),batch_size=1)
         
         print("test data loaded")
         test_log_likelihood, test_loss, test_mse, nb, = 0, 0, 0, 0
@@ -238,9 +245,9 @@ for iterations in range(1):
 
         for data in test_loader:
             nb += 1
-            if nb==1001:
+            if nb>10:
                 break
-            #if nb<71:
+            #if nb<6:
             #    continue
             
             print("Image : ", nb)
@@ -261,12 +268,12 @@ for iterations in range(1):
             random = False
 
             img = b_full.cpu().data.numpy()         ## added .data
-            #plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" + str(nb%10) +  "true.png")
+            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" + str(nb%10) +  "true.png")
 
             missing = b_data
             missing[~b_mask] = 0.5      
             img = missing.cpu().data.numpy() 
-            #plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" + str(nb%10) +   "missing.png" )
+            plot_image_svhn(np.squeeze(img),results + str(i) + "/compiled/" + str(nb%10) +   "missing.png" )
 
             b_data_low = b_data
             b_data_sample = b_data
@@ -288,12 +295,12 @@ for iterations in range(1):
             imputation = b_data.to(device,dtype = torch.float)
             xm_logits, out_encoder, sigma_decoder = mvae_impute_svhn(b_data.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, L=1)
             imputation[~b_mask] = xm_logits[~b_mask]
-            #plot_image_svhn(np.squeeze(imputation.cpu().data.numpy()), results + str(i) + "/compiled/"  + str(nb%10) + "-miss-imputation.png" )
+            plot_image_svhn(np.squeeze(imputation.cpu().data.numpy()), results + str(i) + "/compiled/"  + str(nb%10) + "-miss-imputation.png" )
 
-            #imputation_ = b_data.to(device,dtype = torch.float)
-            #xm_logits, out_encoder, sigma_decoder = mvae_impute_svhn( b_full.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, L=1)
-            #imputation_[~b_mask] = xm_logits[~b_mask]
-            #plot_image_svhn(np.squeeze(imputation_.cpu().data.numpy()), results + str(i) + "/compiled/"  + "-true-imputation.png" )
+            imputation_ = b_data.to(device,dtype = torch.float)
+            xm_logits, out_encoder, sigma_decoder = mvae_impute_svhn( b_full.to(device,dtype = torch.float), b_mask, encoder, decoder, p_z, d, L=1)
+            imputation_[~b_mask] = xm_logits[~b_mask]
+            plot_image_svhn(np.squeeze(imputation_.cpu().data.numpy()), results + str(i) + "/compiled/"  + "-true-imputation.png" )
 
             print("Lower IWAE bound (0's) : ", lower_bound)
             print("Upper IWAE bound (true image) : ", upper_bound)
@@ -349,7 +356,7 @@ for iterations in range(1):
             #Impute image with pseudo-gibbs
             pseudo_gibbs_image = b_data.to(device,dtype = torch.float)
             pseudo_gibbs_image[~b_mask] = x_logits_pseudo_gibbs[~b_mask]
-            #plot_image_svhn(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/compiled/" +  str(nb%10) + "pseudo-gibbs.png" )
+            plot_image_svhn(np.squeeze(pseudo_gibbs_image.cpu().data.numpy()), results + str(i) + "/compiled/" +  str(nb%10) + "pseudo-gibbs.png" )
 
             ##M-with-gibbs sampler
             start_m = datetime.now()
@@ -364,7 +371,7 @@ for iterations in range(1):
             #Impute image with metropolis-within-pseudo-gibbs
             metropolis_image = b_data.to(device,dtype = torch.float)
             metropolis_image[~b_mask] = x_full_logits[~b_mask]
-            #plot_image_svhn(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/compiled/" + str(nb%10) + "metropolis-within-pseudo-gibbs.png" )
+            plot_image_svhn(np.squeeze(metropolis_image.cpu().data.numpy()), results + str(i) + "/compiled/" + str(nb%10) + "metropolis-within-pseudo-gibbs.png" )
 
             dd = False
 
@@ -431,7 +438,6 @@ for iterations in range(1):
             b_data[:,1,:,:][~b_mask[:,1,:,:]] = channel_1
             b_data[:,2,:,:][~b_mask[:,2,:,:]] = channel_2
 
-
             xm_nelbo_, xm_error_, iwae, t1, t2, params_ = optimize_IAF(num_epochs = num_epochs_test, z_params = z_init, b_data = b_data.to(device,dtype = torch.float), sampled_image_o = sampled_image_o.to(device,dtype = torch.float), b_mask = b_mask.to(device,dtype = torch.bool), b_full = b_full.to(device,dtype = torch.float), p_z = p_z, encoder = encoder, decoder = decoder, device = device, d = d, results = results, iterations = iterations, nb=nb, K_samples = K_samples, data='svhn', p_z_eval = p_z_eval, with_gaussian=True )
             end_iaf = datetime.now()
             diff_iaf = end_iaf - start_iaf
@@ -460,10 +466,6 @@ for iterations in range(1):
             z_params.append(params)
             #print(z_params)
             #print(torch.cuda.current_device())
-            #means_ = torch.from_numpy(gm.means_)
-            #std_ = torch.sqrt(torch.from_numpy(gm.covariances_))
-            #weights_ = torch.from_numpy(gm.weights_)
-            #p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
 
             #With re-inits
             start_mix = datetime.now()
@@ -494,13 +496,13 @@ for iterations in range(1):
 
             print(lower_bound/nb, upper_bound/nb, bound_updated_encoder/nb, pseudo_iwae/nb, m_iwae/nb,  xm_iwae/nb,  xm_NN_iwae/nb,  iaf_iwae/nb, z_iwae/nb, mixture_iwae/nb, mixture_iwae_inits/nb) #added mixture_iwae_inits later
 
-            file_save_params = results + str(-1) + "/pickled_files/params_svhn_TH_mixture.pkl"
+            file_save_params = results + str(-1) + "/pickled_files/params_svhn_patches.pkl"
 
             with open(file_save_params, 'wb') as file:
                 pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
             #pickle.dump([iaf_gaussian_params, iaf_mixture_params ,iaf_mixture_params_re_inits ,nb], file)
 
-            file_loss = results + str(-1) + "/pickled_files/loss_svhn_TH_mixture.pkl"
+            file_loss = results + str(-1) + "/pickled_files/loss_svhn_patches.pkl"
             with open(file_loss, 'wb') as file:
                 pickle.dump([z_loss, mixture_loss_inits, mixture_loss, iaf_loss,  nb], file)
                 #pickle.dump([iaf_gaussian_loss, iaf_mixture_loss, iaf_mixture_reinits_loss, nb], file)

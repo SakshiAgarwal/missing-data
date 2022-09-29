@@ -252,7 +252,7 @@ def train_pygivenx(num_epochs, train_loader, val_loader, ENCODER_PATH, results, 
 	return encoder
 
 
-def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH, DECODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, annealing=False):
+def train_VAE_SVHN(num_epochs, train_loader, val_loader, ENCODER_PATH,  results, encoder, decoder, optimizer, p_z, device, d, stop_early, annealing=False, DECODER_PATH= None):
 	print("Training ---")
 
 	torch.cuda.empty_cache()

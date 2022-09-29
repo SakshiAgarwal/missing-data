@@ -19,7 +19,13 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	out_encoder = encoder.forward(iota_x)
-	q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=(out_encoder[...,d:]).exp()),1) #torch.nn.Softplus()
+	if data =='mnist':
+		q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d],scale=(out_encoder[...,d:]).exp()),1) #torch.nn.Softplus()
+	else:
+		sigma_decoder = decoder.get_parameter("log_sigma")
+		scales_z = 1e-2 + torch.nn.Softplus()(out_encoder[...,d:])
+		q_zgivenxobs = td.Independent(td.Normal(loc=out_encoder[...,:d], scale=scales_z),1)
+
 	zgivenx = q_zgivenxobs.rsample([K]).reshape(K,d) 
 
 	if with_labels:
@@ -36,7 +42,10 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 		xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_e.reshape(-1)),1)
 	else:
 		sigma_decoder = decoder.get_parameter("log_sigma")
-		xgivenz = td.Normal(loc = x_logits_e.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1]))
+		#xgivenz = td.Normal(loc = x_logits_e.reshape([-1,1]), scale =  sigma_decoder.exp()*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1]))
+		scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
+		xgivenz = td.Normal(loc = x_logits_e.reshape([-1,1]), scale = scales_z*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1]))
+
 
 	full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
 	mask_ = torch.Tensor.repeat(mask,[K,1,1,1]).reshape([K,channels*p*q])
@@ -46,7 +55,7 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 	if data=='mnist':
 	    all_log_pxgivenz_flat = td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits_e.reshape([-1,1])).log_prob(data_flat)
 	else:
-	    all_log_pxgivenz_flat = td.Normal(loc = x_logits_e.reshape([-1,1]), scale = sigma_decoder.exp()*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+	    all_log_pxgivenz_flat = td.Normal(loc = x_logits_e.reshape([-1,1]), scale = scales_z*(torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
 
 	#all_log_pxgivenz_flat = xgivenz.log_prob(data_flat)
 	all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K,channels*p*q])
@@ -64,6 +73,8 @@ def eval_iwae_bound(iota_x, full, mask, encoder ,decoder, p_z, d, K=1, with_labe
 	return iwae_bound
 
 
+
+##Trash function ---
 def eval_iwae_bound_svhn(iota_x, full, mask, model, p_z, d, K=1, with_labels=False, labels= None, data='mnist', results = None):
 	channels = iota_x.shape[1]
 	p = iota_x.shape[2]
@@ -78,6 +89,7 @@ def eval_iwae_bound_svhn(iota_x, full, mask, model, p_z, d, K=1, with_labels=Fal
 	zgivenx_flat = zgivenx.reshape([K,d])
 	x_logits_e = model.decoder(zgivenx_flat)
 
+	##sigma_Decoder
 	xgivenz = td.Normal(loc = x_logits_e.reshape([-1,1]), scale = (torch.ones(*x_logits_e.shape).cuda()).reshape([-1,1]))
 
 	full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
@@ -1674,7 +1686,7 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 	num_components = 10
 
 	b_data[~b_mask] = 0
-	r1 = 0
+	r1 = -1
 	r2 = 1
 	#print(b_data.shape, type(b_data)) 
 
@@ -1874,7 +1886,7 @@ def optimize_mixture(num_epochs, p_z, b_data, b_full, b_mask , encoder, decoder,
 	
 	comp_samples = 0
 	
-	do_plot=True
+	do_plot=False
 	if do_plot:
 		comp_samples = np.zeros((num_components+2,50,d))
 		for comp in range(num_components):

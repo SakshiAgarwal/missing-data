@@ -687,9 +687,6 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 		b_data[:,1,:,:][~b_mask[:,1,:,:]] = channel_1
 		b_data[:,2,:,:][~b_mask[:,2,:,:]] = channel_2
 		b_data_ = torch.Tensor.repeat(b_data,[num_components,1,1,1])  
-		
-
-		#b_data_[~b_mask_] = p_xm.sample([num_components]).reshape(-1)  
 
 	out_encoder = encoder.forward(b_data_)
 

@@ -133,13 +133,14 @@ class SVHN_Test(Dataset):
 
 		if patches: 
 			num_patches = 1 #2
-			patch_size = 15
+			patch_size_p = 15
+			patch_size_q = 12
 
 			#miss_pattern_x = [np.random.choice((self.p - patch_size), num_patches, replace=False) for i in range(self.n)]
 			#miss_pattern_y = [(i)*self.p*self.q + self.p*np.random.choice((self.p-patch_size), num_patches, replace=False) for i in range(self.n)]
 
-			miss_pattern_x = [np.random.choice((self.p - patch_size), num_patches, replace=False) for i in range(self.n)]
-			miss_pattern_y = [np.random.choice((self.q - patch_size), num_patches, replace=False) for i in range(self.n)]
+			miss_pattern_x = [np.random.choice((self.p - patch_size_p), num_patches, replace=False) for i in range(self.n)]
+			miss_pattern_y = [np.random.choice((self.q - patch_size_q), num_patches, replace=False) for i in range(self.n)]
 
 			#print(miss_pattern_x)
 			#miss_pattern_x = np.asarray(miss_pattern_x).astype(np.int)
@@ -147,9 +148,9 @@ class SVHN_Test(Dataset):
 			for i in range(self.n):
 				for a,b in zip(miss_pattern_y[i], miss_pattern_x[i]):
 					start_x = int(a)
-					end_x = int(a + patch_size)
+					end_x = int(a + patch_size_q)
 					start_y = int(b)
-					end_y = int(b + patch_size)
+					end_y = int(b + patch_size_p)
 					xmiss[i,:,start_x: end_x, start_y:end_y] = np.nan
 
 			#xmiss = xmiss_flat.reshape([self.n,self.channels,self.p,self.q])
@@ -426,7 +427,7 @@ def get_sample_digit(data_dir, digit, file):
 
 
 class SVHM(Dataset):
-	def __init__(self,dataset, perc_miss=0):
+	def __init__(self,dataset, perc_miss=0, patches=False, top_half=False):
 		self.images  = dataset.data
 		print(self.images)
 
@@ -434,18 +435,57 @@ class SVHM(Dataset):
 		self.n=self.images.shape[0]
 		self.p=self.images.shape[2]
 		self.q=self.images.shape[3]
+		self.channels = self.images.shape[1]
 
 		self.images = self.images.reshape(self.n,3,self.p,self.q)
 		self.masks = np.ones(np.shape(self.images)).astype(np.bool)
 
+		xmiss = np.copy(self.images).astype(np.float)
+		xmiss_flat = xmiss.flatten()
+
+		if patches: 
+			num_patches = 1 #2
+			patch_size_p = 15
+			patch_size_q = 12
+
+			miss_pattern_x = [np.random.choice((self.p - patch_size_p), num_patches, replace=False) for i in range(self.n)]
+			miss_pattern_y = [np.random.choice((self.q - patch_size_q), num_patches, replace=False) for i in range(self.n)]
+
+			for i in range(self.n):
+				for a,b in zip(miss_pattern_y[i], miss_pattern_x[i]):
+					start_x = int(a)
+					end_x = int(a + patch_size_q)
+					start_y = int(b)
+					end_y = int(b + patch_size_p)
+					xmiss[i,:,start_x: end_x, start_y:end_y] = np.nan
+
+			mask = np.isfinite(xmiss).astype(np.bool)  # False indicates missing, True indicates observed
+			xhat_0 = np.copy(self.images).astype(np.float)
+			xhat_0[~mask] = 0
+		elif top_half:
+			mask = np.zeros((1,3,32,32))
+			mask[:,: ,int(32/2):,:] = 1
+			##Right half missing : mask[:,:14] = 1
+			##Bottom half missing : mask[:14,:] = 1
+			mask = mask.astype(np.bool)
+			mask = np.tile(mask, (self.n,1,1,1))
+			xhat_0 = np.copy(self.images).astype(np.float)
+			xhat_0[~mask] = 0
+		else:
+			xhat_0 = np.copy(self.images).astype(np.float)
+
+		self.xhats_0 = xhat_0.reshape(self.n,self.channels,self.p,self.q).astype(np.float)
+		self.masks = mask.reshape(self.n,self.channels,self.p,self.q).astype(np.bool)
+		self.images = self.images.reshape(self.n,self.channels,self.p,self.q)
+
 	def __getitem__(self, idx):
-		return self.images[idx], self.masks[idx]
+		return self.xhats_0[idx] , self.masks[idx], self.images[idx]
 
 	def __len__(self):	
 		return len(self.images)
 
 
-def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data = False):
+def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data = False, top_half=False, patches=False):
 	#normalize = transforms.Normalize((0.5), (0.5))
 
 	train_dataset = datasets.SVHN(root=data_dir, split='train', download=True, transform=transforms.ToTensor())
