@@ -6,6 +6,27 @@ from loss import *
 import matplotlib.cm as cm
 import torch.distributions as td
 from scipy.special import expit
+from pyro.nn import AutoRegressiveNN
+from pyro.distributions.transforms import AffineAutoregressive
+import pyro
+from mixture import *
+
+
+def display_sampled_imputations(true, decoder, q_z, b_mask, d, results, k = 50):
+	fig = plt.figure(figsize=(11, 7))
+	p = b_mask.shape[1]
+	#samples = np.zeros((k,int(p/2)))
+    
+	for i in range(k):
+		x = generate_samples_uci(q_z, decoder, d, p, L=1).cpu().data.numpy()
+		samples = x[~b_mask.cpu().data.numpy()]
+		plt.scatter(samples[0], samples[1], color="blue")
+        
+    
+	plt.scatter(true[~b_mask.cpu().data.numpy()][0], true[~b_mask.cpu().data.numpy()][1], color="green")
+	#plt.show()
+	plt.savefig(results)
+	plt.close()
 
 def plot_loss_vs_sample_size(mixture_loss_samples, K_samples_ ,save_directory):
 	x =  np.zeros((6,len(K_samples_)))
@@ -32,7 +53,7 @@ def scatter_plot_(X, num_components, file):
 	plt.scatter(X[num_components,:,0], X[num_components,:,1], color='b', label='7s')
 	plt.scatter(X[num_components+1,:,0], X[num_components+1,:,1], color=colors[num_components+1], label='9s')
 	plt.legend(loc="upper left")
-	plt.show()
+	#plt.show()
 	plt.savefig(file)
 	plt.close()
 
@@ -46,7 +67,7 @@ def scatter_plot_100(X, num_components, file):
 		plt.scatter(X[n,0], X[n,1], color=colors[n], label=str(n))
 
 	plt.legend(loc="upper left")
-	plt.show()
+	#plt.show()
 	plt.savefig(file)
 	plt.close()
 
@@ -70,13 +91,14 @@ def display_images(decoder, p_z, d, file, k = 50, data='mnist', b_data=None, b_m
 			plt.imshow(np.squeeze(x), cmap='gray', vmin=0, vmax=1)
 		else:
 			x = generate_samples(p_z, decoder, d, L=1, data = "svhn").cpu().data.numpy().reshape(3,32,32)  
-			x = (255/2)*(1 + x)
-			x = x.astype(int)
+			#x = (255/2)*(1 + x)
+			#x = x.astype(int)
+			x = expit(x)
 			x = np.transpose(x, (1, 2, 0))
 			plt.imshow(x)
 		plt.axis('off')
 		#plt.title("missing image")
-	plt.show()
+	#plt.show()
 	plt.savefig(file)
 	plt.close()
 
@@ -139,7 +161,100 @@ def display_images_with_labels(decoder, means, scales, logits_y, d, file, k = 50
 			plt.savefig(directory2+str(comp)+file2)
 			plt.close()
 
+def display_images_svhn_all(decoder, z_params,b_data, encoder,iaf_params, mixture_params, mixture_params_inits, d, file, k = 50):
+	fig = plt.figure(figsize=(11, 7))
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
+	# setting values to rows and column variables
+	rows = 1
+	columns = k
+    
+	for i in range(k):
+		fig.add_subplot(rows, columns, i+1)
+		p_z = td.Independent(td.Normal(loc=z_params[...,:d],scale=torch.nn.Softplus()(z_params[...,d:])),1)
+		x = generate_samples(p_z, decoder, d, L=1, data = "svhn").cpu().data.numpy().reshape(3,32,32)  
+		#x = (255/2)*(1 + x)
+		x = expit(x)
+		#x = x.astype(int)
+		x = np.transpose(x, (1, 2, 0))
+		plt.imshow(x)
+		plt.axis('off')
+		#plt.title("missing image")
+
+	plt.savefig(file+"z.png")
+	plt.close()   
+	exit()    
+	count = 20
+	autoregressive_nn =  AutoRegressiveNN(d, [320, 320]).cuda().to(device,dtype = torch.float)
+	autoregressive_nn2 =  AutoRegressiveNN(d, [320, 320]).cuda().to(device,dtype = torch.float)
+	[t1, t2] = iaf_params
+	autoregressive_nn.load_state_dict(t1)
+	autoregressive_nn2.load_state_dict(t2)
+
+	z_params = encoder.forward(b_data.to(device,dtype = torch.float))
+	scales_z = 1e-2 + torch.nn.Softplus()(z_params[...,d:])
+	p_z = td.Independent(td.Normal(loc=z_params[...,:d],scale = scales_z),1)
+
+	transform = AffineAutoregressive(autoregressive_nn).cuda()
+	transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
+	pyro.module("my_transform", transform)  
+	flow_dist = pyro.distributions.torch.TransformedDistribution(p_z, [transform, transform2])
+
+	fig = plt.figure(figsize=(10, 10))
+	for i in range(k):
+		fig.add_subplot(rows, columns, i+1)
+		p_z = td.Independent(td.Normal(loc=z_params[...,:d],scale=torch.nn.Softplus()(z_params[...,d:])),1)
+		x = generate_samples(flow_dist, decoder, d, L=1, data = "svhn").cpu().data.numpy().reshape(3,32,32)  
+		#x = (255/2)*(1 + x)
+		#x = expit(x)
+		#x = x.astype(int)
+		x = np.transpose(x, (1, 2, 0))
+		plt.imshow(x)
+		plt.axis('off')
+		#plt.title("missing image")        
+
+	plt.savefig(file+"iaf.png")
+	plt.close()
+
+	fig = plt.figure(figsize=(10, 10))
+	count = 40
+	[logits, means, scales] = mixture_params
+	p_z = ReparameterizedNormalMixture1d(logits.to(device,dtype = torch.float), means.to(device,dtype = torch.float), 1e-2 +  torch.nn.Softplus()(scales.to(device,dtype = torch.float)))
+	for i in range(k):
+		fig.add_subplot(rows, columns,  i+1)
+		x = generate_samples(p_z, decoder, d, L=1, data = "svhn").cpu().data.numpy().reshape(3,32,32)  
+		#x = (255/2)*(1 + x)
+		#x = expit(x)
+		#x = x.astype(int)
+		x = np.transpose(x, (1, 2, 0))
+		plt.imshow(x)
+		plt.axis('off')
+		#plt.title("missing image")
+    
+	plt.savefig(file+"mixture.png")
+	plt.close()
+    
+	count = 60
+	fig = plt.figure(figsize=(10, 10))
+
+
+	[logits, means, scales] = mixture_params_inits
+	p_z = ReparameterizedNormalMixture1d(logits.to(device,dtype = torch.float), means.to(device,dtype = torch.float), 1e-2 +  torch.nn.Softplus()(scales.to(device,dtype = torch.float)))
+	for i in range(k):
+		fig.add_subplot(rows, columns, i+1)
+		x = generate_samples(p_z, decoder, d, L=1, data = "svhn").cpu().data.numpy().reshape(3,32,32)  
+		#x = (255/2)*(1 + x)
+		#x = expit(x)
+		#x = x.astype(int)
+		x = np.transpose(x, (1, 2, 0))
+		plt.imshow(x)
+		plt.axis('off')
+		#plt.title("missing image")
+
+	#plt.show()
+	plt.savefig(file+"mixture-inits.png")
+	plt.close()    
 
 def display_images_svhn(decoder, p_z, d, file, k = 50):
 	fig = plt.figure(figsize=(11, 7))
@@ -160,7 +275,7 @@ def display_images_svhn(decoder, p_z, d, file, k = 50):
 		plt.axis('off')
 		#plt.title("missing image")
 
-	plt.show()
+	#plt.show()
 	plt.savefig(file)
 	plt.close()
 
@@ -202,7 +317,7 @@ def plot_image(img, file='true.png', missing_pattern_x = None, missing_pattern_y
 		plt.scatter(missing_pattern_y, missing_pattern_x)
 
 	#plt.ticklabel_format()
-	plt.show()
+	#plt.show()
 	plt.savefig(file)
 	plt.close()
 
@@ -218,22 +333,15 @@ def plot_image_svhn(img, file='true.png', missing_pattern_x = None, missing_patt
 	#img[1,:,:] = img[1,:,:]*std[1] + mean[1]
 	#img[2,:,:] = img[2,:,:]*std[2] + mean[2]
 
-	print(np.max(img), np.min(img))
+	#print(np.max(img), np.min(img))
 	#img = (img)*(255)
-
-	print(np.max(img), np.min(img))
 	#exit()
 	#img = img.astype(int)
 	img = expit(img)
 
 	img =  np.transpose(img, (1, 2, 0))
 	plt.imshow(img)
-
-	if missing_pattern_x is not None: 
-		plt.scatter(missing_pattern_y, missing_pattern_x)
-
 	#plt.ticklabel_format()
-	plt.show()
 	plt.savefig(file)
 	plt.close()
 
@@ -333,6 +441,27 @@ def plot_images(image1,image2, image3, image4, image5, image6, image7, image8, i
 	plt.savefig(file)
 	plt.close()
 
+
+def plot_images_svhn_block(images, file):
+	fig = plt.figure(figsize=(6, 5))
+
+	# setting values to rows and column variables
+	rows = 1
+	columns = 5
+	tags = ["T", "M", "E", "E(Train)", "E(Test)"]    
+	for i in range(len(images)): 
+		fig.add_subplot(rows, columns, i+1)
+		# showing image
+		img = expit(images[i])
+		img = np.transpose(img, (1, 2, 0))
+		plt.imshow(img)
+		plt.axis('off')
+		if i < len(tags):
+			plt.title(tags[i])
+
+	#plt.show()
+	plt.savefig(file)
+	plt.close()
 
 def plot_images_z(image1,image2, image3, file1, image4, image5, file_save, iters):
 	fig = plt.figure(figsize=(6, 5))
@@ -634,13 +763,16 @@ def plot_images_comparing_methods(images, file, data='mnist'):
 
 	for i in range(len(images)):
 		fig.add_subplot(rows, columns, i+1)
-		# showing image
-		plt.imshow(images[i], cmap='gray', vmin=0, vmax=1)
-		#plt.imshow(image1)
+		if data=='mnist':
+			plt.imshow(images[i], cmap='gray', vmin=0, vmax=1)
+		else:
+			#img = expit(images[i])
+			img =  np.transpose(img, (1, 2, 0))
+			plt.imshow(img)
 		plt.axis('off')
 		#plt.title("0 ")
 
-	plt.show()
+	#plt.show()
 	plt.savefig(file)
 	plt.close()
 

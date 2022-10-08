@@ -61,25 +61,21 @@ def burn_in_svhn(b_data, b_mask, encoder, decoder, p_z, d, burn_in_period=20, da
 	channels = b_data.shape[1]
 	p = b_data.shape[2]
 	q = b_data.shape[3]
-
-	if data=='mnist':
-		x_logits = torch.log(b_data/(1-b_data)).reshape(1,channels,p,q)
-	else:
-		x_logits = b_data.reshape(1,channels,p,q)
-
-	if data=='mnist':
-		z_init =  mvae_impute(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, with_labels=with_labels, labels= labels)[1]
-		for l in range(burn_in_period):
-			x_logits, z_init = mvae_impute(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, with_labels=with_labels, labels= labels)
-			x_logits = x_logits.reshape(1,1,p,q)
-			b_data[0,0,:,:].reshape([1,1,28,28])[~b_mask] = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=x_logits),1).sample()[~b_mask]
-	else: 
-		z_init =  mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1)[1]
-		for l in range(burn_in_period):
-			x_logits, z_init, sigma_decoder = mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1)
-			x_logits = x_logits.reshape(1,channels,p,q)
-			b_data[~b_mask] = td.Normal(loc = x_logits, scale =  sigma_decoder.exp()*(torch.ones(*x_logits.shape).cuda())).sample()[~b_mask]
-
+	results=os.getcwd() + "/results/svhn/" 
+	#print("in burn-in")
+	x_logits = b_data.reshape(1,channels,p,q)
+    
+	#z_init =  mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1)[1]
+	for l in range(burn_in_period):
+		img = b_data.cpu().data.numpy()    
+		#print("1st iteration:", torch.mean(b_data[:,0,:,:][~b_mask[:,0,:,:]]), torch.mean(b_data[:,1,:,:][~b_mask[:,1,:,:]]), torch.mean(b_data[:,2,:,:][~b_mask[:,2,:,:]]))
+		plot_image_svhn(np.squeeze(img),results + str(-1) + "/compiled/" + str(l) + "-burn-in.png" )
+		x_logits, z_init, sigma_decoder, sample = mvae_impute_svhn(iota_x = b_data,mask = b_mask,encoder = encoder,decoder = decoder, p_z = p_z, d=d, L=1, return_sample=True)
+		#x_logits = x_logits.reshape(1,channels,p,q)
+		b_data[~b_mask] = sample[~b_mask]
+		imputation = b_data
+		imputation[~b_mask] = x_logits[~b_mask]
+        
 	return x_logits, b_data, z_init
 
 
@@ -680,13 +676,17 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 		channel_0 = torch.mean(b_data[:,0,:,:][b_mask[:,0,:,:]])
 		channel_1 = torch.mean(b_data[:,1,:,:][b_mask[:,1,:,:]])
 		channel_2 = torch.mean(b_data[:,2,:,:][b_mask[:,2,:,:]])
-
-		p_xm = td.Normal(loc = 0.5 + x_logits_init[~b_mask].reshape([-1,1]), scale =  torch.ones_like(b_data)[~b_mask].reshape([-1,1])) #.to(device,dtype = torch.float)
+		channels_mean = torch.tensor([channel_0, channel_1, channel_2]).to(device,dtype = torch.float)        
+		p_xm = td.Normal(loc = channels_mean.reshape([-1,1]), scale =  torch.ones_like(channels_mean).reshape([-1,1])) #.to(device,dtype = torch.float)
+		mp = int(len(b_data[~b_mask])/3)
+		print("missing pixels --", mp)       
+		#p_xm = td.Normal(loc = 0.5 + x_logits_init[~b_mask].reshape([-1,1]), scale =  torch.ones_like(b_data)[~b_mask].reshape([-1,1])) #.to(device,dtype = torch.float)
 		#b_data_[~b_mask] = 0.5
 		b_data[:,0,:,:][~b_mask[:,0,:,:]] = channel_0
 		b_data[:,1,:,:][~b_mask[:,1,:,:]] = channel_1
 		b_data[:,2,:,:][~b_mask[:,2,:,:]] = channel_2
 		b_data_ = torch.Tensor.repeat(b_data,[num_components,1,1,1])  
+		#b_data_[~b_mask_] = p_xm.sample([num_components*mp]).reshape(-1) 
 
 	out_encoder = encoder.forward(b_data_)
 
@@ -699,13 +699,15 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 	#print(out_encoder.shape)
 	means[:,...] = out_encoder[...,:d]
 	scales[:,...] = out_encoder[...,d:]
-
+	#print(means)
 	sigma = torch.sum(scales.exp(),2)
 	#print(torch.sum(means,2))
 	sigma = torch.Tensor.repeat(sigma.reshape(batch_size, num_components, 1), [1,1,d])
 
-	means +=  (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 
-
+	if data=='mnist':    
+		means +=  (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 
+	else:
+		means += (r2 - r1) * torch.rand(batch_size, num_components, d) + r1  #0.5 * torch.rand(batch_size, num_components, d)  #0.1 for not random case
 	#means +=  torch.mul(scales.exp(), (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 )# Add random noise between [-1,1]
 	#scales = -1*torch.ones(batch_size, num_components, d)
 
@@ -753,6 +755,40 @@ def init_mixture(encoder, decoder, p_z, b_data, b_mask, num_components, batch_si
 			#b_data[~b_mask] = 0
 
 	return logits, means, scales
+
+def init_mixture_table(encoder, decoder, p_z, b_data, b_mask, num_components, batch_size, d, r1=-1, r2=1):
+
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+	b_data_ = torch.Tensor.repeat(b_data,[num_components,1])  
+	b_mask_ = torch.Tensor.repeat(b_mask,[num_components,1])
+	x_logits_init = torch.zeros_like(b_data)
+
+	out_encoder = encoder.forward(b_data_)
+
+	logits = torch.zeros(batch_size, num_components)
+	means = torch.zeros(batch_size, num_components, d)
+	scales = torch.ones(batch_size, num_components, d)
+	#means = (r2 - r1) * torch.rand(batch_size, num_components, d) + r1
+	#scales = (r2 - r1) * torch.rand(batch_size, num_components, d) + r1
+
+	#print(out_encoder.shape)
+	means[:,...] = out_encoder[...,:d]
+	scales[:,...] = out_encoder[...,d:]
+
+	sigma = torch.sum(scales.exp(),2)
+	#print(torch.sum(means,2))
+	sigma = torch.Tensor.repeat(sigma.reshape(batch_size, num_components, 1), [1,1,d])
+
+	means +=  (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 
+
+	#means +=  torch.mul(scales.exp(), (r2 - r1) * torch.rand(batch_size, num_components, d) + r1 )# Add random noise between [-1,1]
+	#scales = -1*torch.ones(batch_size, num_components, d)
+
+	#print(torch.sum(means,2), torch.sum(scales.exp(),2))
+	
+	return logits, means, scales
+
 
 
 

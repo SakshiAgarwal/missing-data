@@ -8,8 +8,7 @@ from plot import *
 from sklearn.datasets import load_iris, load_breast_cancer, load_boston 
 import pandas as pd
 
-
-def load_uci_datasets(dataset='iris'):
+def load_uci_datasets(dataset='iris', missing_for_train = False):
 	if dataset=='iris':
 		data = load_iris()['data']
 		print(data)
@@ -48,22 +47,48 @@ def load_uci_datasets(dataset='iris'):
 	testset = xfull[split2:]
 
 	n_test = np.shape(testset)[0]
+    
 	##For missing data in testset
 	perc_miss = 0.5 # 50% of missing data
-	xmiss = np.copy(testset)
-	xmiss_flat = xmiss.flatten()
-	miss_pattern = np.random.choice(n_test*p, np.floor(n_test*p*perc_miss).astype(np.int), replace=False)
-	xmiss_flat[miss_pattern] = np.nan 
-	xmiss = xmiss_flat.reshape([n_test,p]) # in xmiss, the missing values are represented by nans
-	mask = np.isfinite(xmiss) # binary mask that indicates which values are missing
+	xhat_0 = np.copy(testset)
+	mask = np.ones((n_test, p))
+    
+	for i in range(n_test):
+		miss_pattern = np.random.choice(p, np.floor(p*perc_miss).astype(np.int), replace=False)
+		#print(miss_pattern)
+		for j in range(len(miss_pattern)):
+			xhat_0[i,miss_pattern[j]] = 0
+			mask[i,miss_pattern[j]] = 0  
+		#print(xhat_0[i], testset[i], mask[i])
 
-	xhat_0 = np.copy(xmiss)
-	xhat_0[np.isnan(xmiss)] = 0
+	if missing_for_train:
+		train_miss = np.copy(trainset)
+		n_train = np.shape(trainset)[0]
+		mask_train = np.ones((n_train, p))
+		for i in range(n_train):
+			miss_pattern = np.random.choice(p, np.floor(p*perc_miss).astype(np.int), replace=False)
+			#print(miss_pattern)
+			for j in range(len(miss_pattern)):
+				train_miss[i,miss_pattern[j]] = 0
+				mask_train[i,miss_pattern[j]] = 0  
+			#print(train_miss[i], trainset[i], mask_train[i])
 
-	#print(xhat_0, testset)
-	#exit()
+		valid_miss = np.copy(validset)
+		n_valid = np.shape(validset)[0]
+		mask_valid = np.ones((n_valid, p))
+		for i in range(n_valid):
+			miss_pattern = np.random.choice(p, np.floor(p*perc_miss).astype(np.int), replace=False)
+			#print(miss_pattern)
+			for j in range(len(miss_pattern)):
+				valid_miss[i,miss_pattern[j]] = 0
+				mask_valid[i,miss_pattern[j]] = 0  
+			#print(valid_miss[i], validset[i], mask_valid[i])               
 
-	return trainset, validset, xhat_0, mask, testset
+   
+	if missing_for_train:
+		return train_miss, mask_train, valid_miss, mask_valid, xhat_0, mask
+	else:
+		return trainset, validset, xhat_0, mask, testset
 
 
 def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = False, return_labels=False, ispatches=False, top_half=False):
@@ -100,28 +125,25 @@ def train_valid_loader(data_dir, batch_size=64, valid_size=0.2, binary_data = Fa
 	valid_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST(valid_dataset, patches =ispatches, top_half=top_half, return_labels = return_labels),batch_size=1, sampler=valid_sampler)
 	return train_loader, valid_loader
 
-
-
-
-
 class SVHN_Test(Dataset):
 	def __init__(self, perc_miss=0, top_half=False, patches=False, noise=False, std=0):
 		test_dataset = datasets.SVHN(root='data', split='test',  download=True, transform=transforms.ToTensor())
-
-		self.images = test_dataset.data 				
+		print(test_dataset.data.shape, test_dataset.data[:1000].shape)        
+		self.images = test_dataset.data[:1000] 				
 		self.perc_miss = perc_miss
 		##Normalize data to 
-
+		print(self.images.shape)
 		std = [0.2023, 0.1994, 0.2010]
 		mean = [0.4914, 0.4822, 0.4465]
-
+		std = [0.5, 0.5, 0.5]
+		mean = [0.5, 0.5, 0.5]
 		self.images = (self.images/255)
 		self.images[:,0,:,:] = (self.images[:,0,:,:]- mean[0])/std[0]
 		self.images[:,1,:,:] = (self.images[:,1,:,:]- mean[1])/std[1]
 		self.images[:,2,:,:] = (self.images[:,2,:,:]- mean[2])/std[2]
 
 		np.random.seed(1234)
-		print(np.max(self.images), np.min(self.images))
+		#print(np.max(self.images), np.min(self.images))
 
 		self.n=self.images.shape[0]
 		self.channels = self.images.shape[1]
@@ -132,9 +154,9 @@ class SVHN_Test(Dataset):
 		xmiss_flat = xmiss.flatten()
 
 		if patches: 
-			num_patches = 1 #2
-			patch_size_p = 15
-			patch_size_q = 12
+			num_patches = 2 #1
+			patch_size_p = 10 #15
+			patch_size_q = 10 #12
 
 			#miss_pattern_x = [np.random.choice((self.p - patch_size), num_patches, replace=False) for i in range(self.n)]
 			#miss_pattern_y = [(i)*self.p*self.q + self.p*np.random.choice((self.p-patch_size), num_patches, replace=False) for i in range(self.n)]
@@ -160,7 +182,10 @@ class SVHN_Test(Dataset):
 
 		if top_half:
 			mask = np.zeros((1,3,32,32))
-			mask[:,: ,int(32/2):,:] = 1
+			mask[:,: ,16:,:] = 1
+			mask[:,: ,:,:6] = 1
+			mask[:,: ,:,26:] = 1
+			#mask[:,: ,16:,:] = 1
 			##Right half missing : mask[:,:14] = 1
 			##Bottom half missing : mask[:14,:] = 1
 			mask = mask.astype(np.bool)
@@ -185,9 +210,8 @@ class SVHN_Test(Dataset):
 class BinaryMNIST_Test(Dataset):
 	def __init__(self,binarize=False,perc_miss=0,top_half=False,patches=False, noise=False,std=0, return_labels=False):
 		test_dataset = datasets.MNIST(root='data', train=False, download=True, transform=transforms.ToTensor())
-
 		self.images = test_dataset.data 				
-		self.labels = test_dataset.targets
+		self.labels = test_dataset.targets        
 		print(self.labels.shape[0])
 		max_label = 9
 		b_ = np.zeros((self.labels.shape[0], 10))
@@ -202,8 +226,6 @@ class BinaryMNIST_Test(Dataset):
 		    self.images[self.images >= 127] = 1  #255
 		else:
 		    self.images = self.images.float()/255
-
-
 
 		np.random.seed(1234)
 		self.n=self.images.size()[0]
@@ -429,9 +451,9 @@ def get_sample_digit(data_dir, digit, file):
 class SVHM(Dataset):
 	def __init__(self,dataset, perc_miss=0, patches=False, top_half=False):
 		self.images  = dataset.data
-		print(self.images)
+		#print(self.images)
 
-		print(self.images.shape)
+		#print(self.images.shape)
 		self.n=self.images.shape[0]
 		self.p=self.images.shape[2]
 		self.q=self.images.shape[3]
@@ -462,20 +484,25 @@ class SVHM(Dataset):
 			mask = np.isfinite(xmiss).astype(np.bool)  # False indicates missing, True indicates observed
 			xhat_0 = np.copy(self.images).astype(np.float)
 			xhat_0[~mask] = 0
+			self.masks = mask.reshape(self.n,self.channels,self.p,self.q).astype(np.bool)
 		elif top_half:
 			mask = np.zeros((1,3,32,32))
-			mask[:,: ,int(32/2):,:] = 1
+			#mask[:,: ,int(32/2):,:] = 1
+			mask[:,: ,16:,:] = 1
+			mask[:,: ,:,:6] = 1
+			mask[:,: ,:,26:] = 1
 			##Right half missing : mask[:,:14] = 1
 			##Bottom half missing : mask[:14,:] = 1
 			mask = mask.astype(np.bool)
 			mask = np.tile(mask, (self.n,1,1,1))
 			xhat_0 = np.copy(self.images).astype(np.float)
 			xhat_0[~mask] = 0
+			self.masks = mask.reshape(self.n,self.channels,self.p,self.q).astype(np.bool)
 		else:
 			xhat_0 = np.copy(self.images).astype(np.float)
-
+        
 		self.xhats_0 = xhat_0.reshape(self.n,self.channels,self.p,self.q).astype(np.float)
-		self.masks = mask.reshape(self.n,self.channels,self.p,self.q).astype(np.bool)
+		
 		self.images = self.images.reshape(self.n,self.channels,self.p,self.q)
 
 	def __getitem__(self, idx):
@@ -490,26 +517,27 @@ def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data
 
 	train_dataset = datasets.SVHN(root=data_dir, split='train', download=True, transform=transforms.ToTensor())
 	valid_dataset = datasets.SVHN(root=data_dir, split='train',  download=True, transform=transforms.ToTensor())
+	transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    
+	svhn = datasets.SVHN(root=data_dir, split='train',  download=True, transform=transform)
+	#print(np.max(svhn.data), np.min(svhn.data))
+	#exit()    
 
-	if binary_data:
-		train_dataset.data[train_dataset.data<127]=0.0
-		train_dataset.data[train_dataset.data>=127]=1.0
-		
-		valid_dataset.data[train_dataset.data<127]=0.0
-		valid_train_dataset.data[train_dataset.data>=127]=1.0
-	else:
-		train_dataset.data = (train_dataset.data/255)#*2 - 1
-		valid_dataset.data = (valid_dataset.data/255)#*2 - 1
-		std = [0.2023, 0.1994, 0.2010]
-		mean = [0.4914, 0.4822, 0.4465]
-
-		train_dataset.data[:,0,:,:] = (train_dataset.data[:,0,:,:] - mean[0])/std[0]
-		train_dataset.data[:,1,:,:] = (train_dataset.data[:,1,:,:] - mean[1])/std[1]
-		train_dataset.data[:,2,:,:] = (train_dataset.data[:,2,:,:] - mean[2])/std[2]
-
-		valid_dataset.data[:,0,:,:] = (valid_dataset.data[:,0,:,:] - mean[0])/std[0]
-		valid_dataset.data[:,1,:,:] = (valid_dataset.data[:,1,:,:] - mean[1])/std[1]
-		valid_dataset.data[:,2,:,:] = (valid_dataset.data[:,2,:,:] - mean[2])/std[2]
+	train_dataset.data = (train_dataset.data/255)#*2 - 1
+	valid_dataset.data = (valid_dataset.data/255)#*2 - 1
+	std = [0.2023, 0.1994, 0.2010]
+	mean = [0.4914, 0.4822, 0.4465]
+	std = [0.5, 0.5, 0.5]
+	mean = [0.5, 0.5, 0.5]
+	train_dataset.data[:,0,:,:] = (train_dataset.data[:,0,:,:] - mean[0])/std[0]
+	train_dataset.data[:,1,:,:] = (train_dataset.data[:,1,:,:] - mean[1])/std[1]
+	train_dataset.data[:,2,:,:] = (train_dataset.data[:,2,:,:] - mean[2])/std[2]
+	print(np.max(train_dataset.data), np.min(train_dataset.data))
+	valid_dataset.data[:,0,:,:] = (valid_dataset.data[:,0,:,:] - mean[0])/std[0]
+	valid_dataset.data[:,1,:,:] = (valid_dataset.data[:,1,:,:] - mean[1])/std[1]
+	valid_dataset.data[:,2,:,:] = (valid_dataset.data[:,2,:,:] - mean[2])/std[2]
 
 	#num_val = int(np.floor(valid_size * len(dataset)))
 	#num_train = len(dataset) - num_val
@@ -526,7 +554,7 @@ def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data
 	#valid_sampler = SubsetRandomSampler(valid_idx)
 
 	num_train = len(train_dataset)
-	print(num_train)
+	#print(num_train)
 	indices = list(range(num_train))
 	split = int(np.floor(valid_size * num_train))
 	np.random.seed(1234)
@@ -537,8 +565,8 @@ def train_valid_loader_svhn(data_dir, batch_size=64, valid_size=0.2, binary_data
 	train_sampler = SubsetRandomSampler(train_idx)
 	valid_sampler = SubsetRandomSampler(valid_idx)
 
-	train_loader = torch.utils.data.DataLoader(dataset=SVHM(train_dataset), batch_size=batch_size, sampler=train_sampler)
-	valid_loader = torch.utils.data.DataLoader(dataset=SVHM(valid_dataset), batch_size=batch_size, sampler=valid_sampler)
+	train_loader = torch.utils.data.DataLoader(dataset=SVHM(train_dataset,patches=patches, top_half=top_half), batch_size=batch_size, sampler=train_sampler) 
+	valid_loader = torch.utils.data.DataLoader(dataset=SVHM(valid_dataset,patches=patches, top_half=top_half), batch_size=batch_size, sampler=valid_sampler)
 
 	print("length of train set", len(train_dataset))
 

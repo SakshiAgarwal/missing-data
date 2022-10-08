@@ -11,7 +11,7 @@ import os
 import pickle
 from plot import *
 import matplotlib.pyplot as plt
-
+from truncated_normal import *
 
 def mean(x):
     if x != torch.tensor(0.5):
@@ -207,7 +207,7 @@ def miwae_impute_uci(iota_x,mask,encoder,decoder,p_z, d, L=1, with_labels=False,
     else:
         return all_means_obs_model.reshape(L,p)
 
-def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1, alpha=1):
+def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1, alpha=1, truncated_n=False):
     batch_size = iota_x.shape[0]
     channels = iota_x.shape[1]
     p = iota_x.shape[2]
@@ -237,7 +237,9 @@ def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1, alpha=1):
 
     sigma_decoder = decoder.get_parameter("log_sigma")
 
-    all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = (1e-2 + torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+    all_log_pxgivenz_flat = DiscNormal(loc = all_logits_obs_model.reshape([-1,1]), scale = (torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+    #else:
+    #    all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = (1e-3 + torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
     all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,channels*p*q])
 
     logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,[1]).reshape([K,batch_size])
@@ -253,8 +255,31 @@ def mvae_loss_svhn(iota_x, mask, encoder, decoder, p_z, d, K=1, alpha=1):
     #print(torch.sum(logpz), torch.sum(logpxobsgivenz_))
     return neg_bound, log_like
 
+def plot_image_svhn(img, file='true.png', missing_pattern_x = None, missing_pattern_y = None):
 
-def mvae_impute_svhn(iota_x, mask, encoder, decoder, p_z, d, L=1):
+	#plt.subplot(121)
+	#plt.imshow(np.squeeze(img))
+	#plt.imshow(img)
+	std = [0.2023, 0.1994, 0.2010]
+	mean = [0.4914, 0.4822, 0.4465]
+
+	#img[0,:,:] = img[0,:,:]*std[0] + mean[0]
+	#img[1,:,:] = img[1,:,:]*std[1] + mean[1]
+	#img[2,:,:] = img[2,:,:]*std[2] + mean[2]
+
+	#print(np.max(img), np.min(img))
+	#img = (img)*(255)
+	#exit()
+	#img = img.astype(int)
+	#img = expit(img)
+
+	img =  np.transpose(img, (1, 2, 0))
+	plt.imshow(img)
+	#plt.ticklabel_format()
+	plt.savefig(file)
+	plt.close()
+
+def mvae_impute_svhn(iota_x, mask, encoder, decoder, p_z, d, L=1, return_sample=False):
     batch_size = iota_x.shape[0]
     p = iota_x.shape[2]
     q = iota_x.shape[3]
@@ -262,7 +287,7 @@ def mvae_impute_svhn(iota_x, mask, encoder, decoder, p_z, d, L=1):
     
     #iota_x = torch.reshape(iota_x, (batch_size, p*q))
     sigma_decoder = decoder.get_parameter("log_sigma")
-
+    #print("inside mvae_impute funtion:", torch.mean(iota_x[:,1,:,:][~mask[:,1,:,:]]))
     out_encoder = encoder.forward(iota_x)
 
     scales_z = 1e-2 + torch.nn.Softplus()(out_encoder[...,d:])
@@ -273,35 +298,44 @@ def mvae_impute_svhn(iota_x, mask, encoder, decoder, p_z, d, L=1):
     zgivenx = q_zgivenxobs.rsample([L])
     zgivenx_flat = zgivenx.reshape([L*batch_size,d])
 
-    all_logits_obs_model = decoder.forward(zgivenx_flat)
+    all_logits_obs_model = decoder.forward(zgivenx_flat).reshape(K,channels,p,q)
+    xm_logits = all_logits_obs_model.reshape([batch_size,channels,p,q])
+    #print(all_logits_obs_model)
+    #imputation = iota_x.cpu().data.numpy()
+    #plot_image_svhn(np.squeeze(imputation),os.getcwd() + "/results/svhn/"  + str(-1) + "/compiled/"  + "-input.png" )
+    #all_logits_obs_model_cpu = all_logits_obs_model.cpu().data.numpy()
+    #mask_cpu = mask.cpu().data.numpy()
+    #imputation[~mask_cpu] = all_logits_obs_model_cpu.reshape([batch_size,channels,p,q])[~mask_cpu]
+    #print("inside mvae_impute funtion 2:", torch.mean(iota_x[:,1,:,:][~mask[:,1,:,:]]))
+    #plot_image_svhn(np.squeeze(imputation),os.getcwd() + "/results/svhn/"  + str(-1) + "/compiled/"  + "-output.png" )
+    #exit()
+    #iota_x_flat = iota_x.reshape(batch_size,channels*p*q)
 
-    iota_x_flat = iota_x.reshape(batch_size,channels*p*q)
-
-    data_flat = iota_x.reshape([-1,1]).cuda()
-    tiledmask = mask.reshape([batch_size,channels*p*q]).cuda()
-
-    #all_log_pxgivenz_flat = td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model.reshape([-1,1])).log_prob(data_flat)
-    all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale =  (1e-2 + torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
-    #all_log_pxgivenz_flat = td.bernoulli.Bernoulli(logits=all_logits_obs_model.reshape([-1,1])).log_prob(data_flat)
-    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([L*batch_size,channels*p*q])
+    #data_flat = iota_x.reshape([-1,1]).cuda()
+    #tiledmask = mask.reshape([batch_size,channels*p*q]).cuda()
     
-    logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([L,batch_size])
-    logpz = p_z.log_prob(zgivenx)
-    logq = q_zgivenxobs.log_prob(zgivenx)
+    #all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale =  (1e-3 + torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+    #all_log_pxgivenz_flat = DiscNormal(loc = all_logits_obs_model.reshape([-1,1]), scale = (torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+
+    #all_log_pxgivenz = all_log_pxgivenz_flat.reshape([L*batch_size,channels*p*q])
+    
+    #logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([L,batch_size])
+    #logpz = p_z.log_prob(zgivenx)
+    #logq = q_zgivenxobs.log_prob(zgivenx)
 
     #xgivenz = td.Independent(td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model),1)
     #xgivenz = td.Independent(td.bernoulli.Bernoulli(logits=all_logits_obs_model),1)
 
-    imp_weights = torch.nn.functional.softmax(logpxobsgivenz + logpz - logq,0) # these are w_1,....,w_L for all observations in the batch
+    #imp_weights = torch.nn.functional.softmax(logpxobsgivenz + logpz - logq,0) # these are w_1,....,w_L for all observations in the batch
     #print(torch.sum(logpxobsgivenz), torch.sum(logpz), torch.sum(logq))
 
-    #xms = xgivenz.sample().reshape([L,batch_size,28*28])
-    #xm=torch.einsum('ki,kij->ij', imp_weights, xms) 
-    #xm = torch.sigmoid(all_logits_obs_model).reshape([1,batch_size,28*28])
-    xm_logits = all_logits_obs_model.reshape([batch_size,channels,p,q])
-    #imputed_image = torch.sigmoid(xm_logits)
-    return xm_logits, out_encoder, sigma_decoder
+    sample = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale =  (torch.nn.Softplus()(sigma_decoder))*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).sample().reshape([batch_size,channels,p,q])
 
+    #imputed_image = torch.sigmoid(xm_logits)
+    if return_sample:
+        return xm_logits, out_encoder, sigma_decoder, sample
+    else:
+        return xm_logits, out_encoder, sigma_decoder
 
 def latent_loss(z_mean, z_stddev):
     mean_sq = z_mean * z_mean
@@ -430,7 +464,7 @@ def inverse_autoregressive_flow(q_zgivenxobs, p_z, autoregressive_nn, d, K):
         #print(flow_dist.log_prob(z).shape)
     return z, kl, flow_dist
 
-def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1, data='mnist', iaf=False, autoregressive_nn=None, autoregressive_nn2 = None, autoregressive_nn3 = None, autoregressive_nn4 = None, autoregressive_nn5 = None, evaluate=False, full = None):
+def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1, data='mnist', iaf=False, autoregressive_nn=None, autoregressive_nn2 = None, autoregressive_nn3 = None, autoregressive_nn4 = None, autoregressive_nn5 = None, evaluate=False, full = None, beta=1):
     ##iota_x is the missing image, sampled is not to be used, ...
 
     iota_x_ = torch.Tensor.repeat(iota_x,[K,1,1,1]) 
@@ -478,37 +512,40 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
 
     #print("KL from sampled z ---", k_l)
     zgivenx_flat = zgivenx.reshape([K*K_z*batch_size,d])
-    all_logits_obs_model = decoder.forward(zgivenx_flat)
+    all_logits_obs_model = decoder.forward(zgivenx_flat).reshape(K,channels,p,q)
     #print(all_logits_obs_model, torch.sum(torch.isnan(all_logits_obs_model)))
     #print(all_logits_obs_model)
-    data_flat = iota_x_.reshape([-1,1])
-
-    if evaluate:
-        full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
-        data_flat = full_.reshape([-1,1])
+    data_flat = iota_x_[mask_].reshape([-1,1])
 
     tiledmask = mask_.reshape([K*batch_size,channels*p*q]).cuda()
 
     if data=='mnist':
         all_log_pxgivenz_flat = td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model.reshape([-1,1])).log_prob(data_flat)
     else:
-        scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
-        all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+        scales_z = 1e-3 + torch.nn.Softplus()(sigma_decoder)
+        #all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
         #print(all_log_pxgivenz_flat)
+        all_log_pxgivenz_flat = DiscNormal(loc = all_logits_obs_model[mask_].reshape([-1,1]), scale = torch.nn.Softplus()(sigma_decoder)*(torch.ones(*all_logits_obs_model[mask_].shape).cuda()).reshape([-1,1])).log_prob(data_flat)
 
-    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,channels*p*q])
-    logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size]) 
-    logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,batch_size]) 
+    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,channels*p*q-mp])
+    logpxobsgivenz = torch.sum(all_log_pxgivenz,1).reshape([K,batch_size])  #*tiledmask
+    #logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,batch_size]) 
     #print(torch.sum(torch.isnan(logpxobsgivenz)))
 
     if not iaf:
         neg_bound = - (torch.mean(logpxobsgivenz)  - k_l) ## remove logxmissgivenz
     else:
-        neg_bound = - (torch.mean(logpxobsgivenz) - torch.mean(logqz - logpz))
+        neg_bound = - (torch.mean(logpxobsgivenz) - beta*torch.mean(logqz - logpz))
 
     if evaluate:
+        full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
+        print("data (in z_loss_)--",torch.max(full[~mask]), torch.min(full[~mask]) )
+        data_flat = full_[~mask_].reshape([-1,1])
+        all_log_pxgivenz = DiscNormal(loc = all_logits_obs_model[~mask_].reshape([-1,1]), scale = torch.nn.Softplus()(sigma_decoder)*(torch.ones(*all_logits_obs_model[~mask_].shape).cuda()).reshape([-1,1])).log_prob(data_flat).reshape([K*batch_size,mp])
+        logpxmissgivenz = torch.sum(all_log_pxgivenz,1).reshape([K,batch_size])
         neg_bound = - torch.logsumexp(logpxmissgivenz + logpz - logqz, 0)
-        #print(logpxmissgivenz)
+        print(torch.mean(logpxmissgivenz), torch.mean(logpz), torch.mean(logqz) )
+        
         #print(torch.mean(logqz - logpz))
     #print(-torch.mean(logpxobsgivenz).item(), torch.mean(k_l).item())
     #print(logpxobsgivenz, k_l)
@@ -522,6 +559,7 @@ def z_loss_(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1
 
 
 def z_loss_table(iota_x, mask, p_z, z_params, encoder, decoder, device, d, K=1, K_z=1, iaf=False, autoregressive_nn=None, autoregressive_nn2 = None, autoregressive_nn3 = None, autoregressive_nn4 = None, autoregressive_nn5 = None, evaluate=False, full = None):
+    
     ##iota_x is the missing image, sampled is not to be used, ...
     iota_x_ = torch.Tensor.repeat(iota_x,[K,1]) 
     batch_size = iota_x.shape[0]
@@ -906,9 +944,10 @@ def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K
     q = iota_x.shape[3]
     mp = len(iota_x[~mask])
     
+    
     if data=='svhn':
         sigma_decoder = decoder.get_parameter("log_sigma")
-        scales_z = 1e-2 + torch.nn.Softplus()(sigma_decoder)
+        scales_z = 1e-3 + torch.nn.Softplus()(sigma_decoder)
     #iota_x_[~mask_] =  p_xm.rsample([K]).reshape(-1)   
     if data == 'mnist' :
         q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
@@ -936,21 +975,89 @@ def mixture_loss(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K
         k_l = torch.mean(logqz - logpz)
 
     zgivenx_flat = zgivenx.reshape([K*K_z*batch_size,d])
-    all_logits_obs_model = decoder.forward(zgivenx_flat)
-    data_flat = iota_x_.reshape([-1,1])
+    all_logits_obs_model = decoder.forward(zgivenx_flat).reshape(K,channels,p,q)
+    
+    data_flat = iota_x_[mask_].reshape([-1,1])
     tiledmask = mask_.reshape([K*batch_size,channels*p*q]).cuda()
-
-    if evaluate:
-        full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
-        data_flat = full_.reshape([-1,1])
 
     if data=='mnist':
         all_log_pxgivenz_flat = td.continuous_bernoulli.ContinuousBernoulli(logits=all_logits_obs_model.reshape([-1,1])).log_prob(data_flat)
     else:
-        all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+        #all_log_pxgivenz_flat = td.Normal(loc = all_logits_obs_model.reshape([-1,1]), scale = scales_z*(torch.ones(*all_logits_obs_model.shape).cuda()).reshape([-1,1])).log_prob(data_flat)
+        all_log_pxgivenz_flat = DiscNormal(loc = all_logits_obs_model[mask_].reshape([-1,1]), scale = torch.nn.Softplus()(sigma_decoder)*(torch.ones(*all_logits_obs_model[mask_].shape).cuda()).reshape([-1,1])).log_prob(data_flat)
         #print(all_log_pxgivenz_flat)
 
-    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,channels*p*q])
+    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,channels*p*q-mp])
+    logpxobsgivenz = torch.sum(all_log_pxgivenz,1).reshape([K,batch_size]) #*tiledmask
+    #logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,batch_size]) 
+    neg_bound = - (torch.mean(logpxobsgivenz - beta*logqz + beta*logpz) )  # + beta*td.Categorical(logits=logits).entropy() - beta*td.Categorical(logits=logits).entropy().detach() 
+    approx_bound = torch.mean(logpz + logpxobsgivenz)
+    
+    if evaluate:
+        full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
+        data_flat = full_[~mask_].reshape([-1,1])
+        #all_logits_obs_model = torch.clip(all_logits_obs_model, min=0.001, max = 0.999)
+        all_log_pxgivenz = DiscNormal(loc = all_logits_obs_model[~mask_].reshape([-1,1]), scale = torch.nn.Softplus()(sigma_decoder)*(torch.ones(*all_logits_obs_model[~mask_].shape).cuda()).reshape([-1,1])).log_prob(data_flat).reshape([K*batch_size,mp])
+        logpxmissgivenz = torch.sum(all_log_pxgivenz,1).reshape([K,batch_size]) #~tiledmask
+        neg_bound =  - torch.mean(torch.logsumexp(logpxmissgivenz + logpz - logqz,0))
+        #print(torch.mean(logpxmissgivenz), torch.mean(logpz), torch.mean(logqz) )
+
+        
+    if iaf:
+        return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l), flow_dist
+    else:
+        return neg_bound, approx_bound, -torch.mean(logpxobsgivenz), torch.mean(k_l)
+
+def mixture_loss_table(iota_x, mask, p_z, means, scales, logits, decoder, device, d, K=1, K_z=1, beta=1, evaluate=False, full = None, iaf=False, autoregressive_nn=None, autoregressive_nn2= None):
+    ##Not needed I guess
+    mix = td.categorical.Categorical(torch.ones(d,).cuda())  
+    num_components = logits.shape[1]
+    batch_size = iota_x.shape[0]
+    #print(iota_x)
+    iota_x_ = torch.Tensor.repeat(iota_x,[K,1]) 
+    mask_ = torch.Tensor.repeat(mask,[K,1])  
+
+    #print(iota_x_)
+    p = iota_x.shape[1]
+    mp = len(iota_x[~mask])
+    
+    q_z = ReparameterizedNormalMixture1d(logits, means, torch.nn.Softplus()(scales))
+    
+    k_l = torch.zeros(K,batch_size)
+    zgivenx = torch.zeros(K*batch_size,d)
+
+    if iaf:
+        #zgivenx, k_l, flow_dist = inverse_autoregressive_flow(q_zgivenxobs, p_z, autoregressive_nn, d, K)
+        transform = AffineAutoregressive(autoregressive_nn).cuda()
+        transform2 = AffineAutoregressive(autoregressive_nn2).cuda()
+
+        pyro.module("my_transform", transform)  
+        flow_dist = pyro.distributions.torch.TransformedDistribution(q_z, [transform, transform2]) #, transform2, transform3, transform4, transform5
+        zgivenx = flow_dist.rsample([K])  
+        logqz = flow_dist.log_prob(zgivenx).reshape(K,batch_size)
+        logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)    
+        k_l = torch.mean(logqz - logpz)
+    else:
+        zgivenx = q_z.rsample([K*K_z])
+        logqz = q_z.log_prob(zgivenx).reshape(K,batch_size)
+        logpz = p_z.log_prob(zgivenx).reshape(K,batch_size)
+        k_l = torch.mean(logqz - logpz)
+
+    zgivenx_flat = zgivenx.reshape([K*K_z*batch_size,d])
+    out_decoder = decoder.forward(zgivenx_flat)
+    data_flat = iota_x_.reshape([-1,1])
+    tiledmask = mask_.reshape([K*batch_size,p]).cuda()
+
+    all_means_obs_model = out_decoder[..., :p]
+    all_scales_obs_model = torch.nn.Softplus()(out_decoder[..., p:]) + 0.001
+
+    if evaluate:
+        full_ = torch.Tensor.repeat(full,[K,1,1,1]) 
+        data_flat = full_.reshape([-1,1])
+        
+    all_log_pxgivenz_flat = td.Normal(loc = all_means_obs_model.reshape([-1,1]), scale = all_scales_obs_model.cuda().reshape([-1,1])).log_prob(data_flat)
+
+    all_log_pxgivenz = all_log_pxgivenz_flat.reshape([K*batch_size,p])
     logpxobsgivenz = torch.sum(all_log_pxgivenz*tiledmask,1).reshape([K,batch_size]) 
     logpxmissgivenz = torch.sum(all_log_pxgivenz*(~tiledmask),1).reshape([K,batch_size]) 
     neg_bound = - (torch.mean(logpxobsgivenz - beta*logqz + beta*logpz) )  # + beta*td.Categorical(logits=logits).entropy() - beta*td.Categorical(logits=logits).entropy().detach() 
@@ -1285,6 +1392,17 @@ def generate_samples(p_z, decoder, d, L=1, data="mnist"):
     else:        
         xm = torch.sigmoid(all_logits_obs_model).reshape([1,1,28*28])
     return xm
+
+def generate_samples_uci(p_z, decoder, d, p, L=1):
+    z = p_z.sample([L])
+    z_flat = z.reshape([L,d])
+    out_decoder = decoder.forward(z_flat)
+
+    all_means_obs_model = out_decoder[..., :p]
+    all_scales_obs_model = torch.nn.Softplus()(out_decoder[..., p:]) + 0.001
+
+    return all_means_obs_model.reshape([1,p])
+
 
 def generate_samples_with_labels(means, scales, logits_y, decoder, d, L=1, data="mnist", logits=None):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

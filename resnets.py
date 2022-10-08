@@ -493,7 +493,7 @@ class FlatWideResNet(nn.Module):
 @RegisterNetwork('wrn_upscale', encoder='wrn_inverse', decoder='wrn')
 class FlatWideResNetUpscaling(nn.Module):
     def __init__(self, channels, shape=(32, 32), in_features=None, size=2, levels=4, blocks_per_level=4, kernel_size=3,
-                 activation=F.gelu, dense_blocks=0, bn=True, avg_pool=False, dense_units=1000, transpose=False, model="vae"):
+                 activation=F.gelu, dense_blocks=0, bn=True, avg_pool=False, dense_units=1000, transpose=False, model="vae", evaluate=False):
         nn.Module.__init__(self)
         in_features = dense_units if in_features is None else in_features
         conv_shape, features = wrnsize(shape, size, levels)
@@ -512,7 +512,10 @@ class FlatWideResNetUpscaling(nn.Module):
         if self.model == 'sigma_vae':
             ## Sigma VAE
             #self.log_sigma = torch.nn.Parameter(torch.full((1,), 0)[0], requires_grad=True)
-            self.log_sigma = torch.nn.Parameter(torch.rand(1, device='cuda'), requires_grad = True)
+            if evaluate:
+                self.log_sigma = torch.nn.Parameter(torch.rand(1, device='cuda'), requires_grad = False)
+            else:
+                self.log_sigma = torch.nn.Parameter(torch.rand(1, device='cuda'), requires_grad = True)
 
         self.wrn = WideResNetUpscaling(channels, size, levels, blocks_per_level, kernel_size, activation, bn=bn, transpose=transpose)
 

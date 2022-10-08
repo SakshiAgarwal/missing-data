@@ -1,13 +1,13 @@
 import os
 from numba import cuda
-cuda.select_device(3)
+cuda.select_device(1)
 print(cuda.current_context().get_memory_info())
 #os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 #os.environ["NVIDIA_VISIBLE_DEVICES"] = "2"
-os.environ['CUDA_LAUNCH_BLOCKING'] = '3'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import torch
-torch.cuda.set_device(3)
+torch.cuda.set_device(1)
 print(torch.cuda.current_device())
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -103,15 +103,15 @@ if num_epochs>0:
     encoder, decoder = train_VAE(num_epochs, train_loader, val_loader, ENCODER_PATH, results, encoder, decoder, optimizer, p_z, device, d, stop_early, DECODER_PATH = DECODER_PATH)
 
 ### Load model 
-checkpoint = torch.load(ENCODER_PATH)
+checkpoint = torch.load(ENCODER_PATH, map_location='cuda:1')
 encoder.load_state_dict(checkpoint['model_state_dict'])
-checkpoint = torch.load(DECODER_PATH)
+checkpoint = torch.load(DECODER_PATH, map_location='cuda:1')
 decoder.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED)
+checkpoint = torch.load(ENCODER_PATH_UPDATED, map_location='cuda:1')
 encoder_updated.load_state_dict(checkpoint['model_state_dict'])
 
-checkpoint = torch.load(ENCODER_PATH_UPDATED_Test)
+checkpoint = torch.load(ENCODER_PATH_UPDATED_Test, map_location='cuda:1')
 encoder_updated_test.load_state_dict(checkpoint['model_state_dict'])
 
 encoder.eval()
@@ -196,11 +196,12 @@ for K_samples in K_samples_ :
     for iterations in range(1):
         for i in [-1]:
             #p_z = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+            #p_z_eval = td.Independent(td.Normal(loc=torch.zeros(d).cuda(),scale=torch.ones(d).cuda()),1)
+
 
             means_ = torch.from_numpy(gm.means_)
             std_ = torch.sqrt(torch.from_numpy(gm.covariances_))
             weights_ = torch.from_numpy(gm.weights_)
-
             p_z = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
             p_z_eval = td.mixture_same_family.MixtureSameFamily(td.Categorical(probs=weights_.cuda()), td.Independent(td.Normal(means_.cuda(), std_.cuda()), 1))
 
@@ -323,7 +324,7 @@ for K_samples in K_samples_ :
                     else:
                         burn_in_image = b_data.to(device,dtype = torch.float)
                         burn_in_image[~b_mask] = torch.sigmoid(x_logits_init)[~b_mask].to(device,dtype = torch.float)
-                        plot_image(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/images/" + str(nb%10) + "/"  + str(iterations) + '-' + "burn-in.png" )
+                        #plot_image(np.squeeze(burn_in_image.cpu().data.numpy()),results + str(i) + "/compiled/" +  "burn-in.png" )
 
                 dd = False
 
@@ -480,18 +481,19 @@ for K_samples in K_samples_ :
                 #plot_all_images(i, nb, iterations, results + str(i) + "/compiled/" + str(nb%10)  + str(iterations)  + 'image-comparison.png', prefix)
                 gc.collect()
 
+                exit()
                 #print(lower_bound, upper_bound, bound_updated_encoder, pseudo_iwae, m_iwae,  xm_iwae,  xm_NN_iwae,  iaf_iwae, z_iwae, mixture_iwae_inits, mixture_iwae)
                 #nb += 1
                 print(lower_bound/nb, upper_bound/nb, bound_updated_encoder/nb, pseudo_iwae/nb, m_iwae/nb,  xm_iwae/nb,  xm_NN_iwae/nb,  iaf_iwae/nb, z_iwae/nb, mixture_iwae/nb, mixture_iwae_inits/nb) #added mixture_iwae_inits later
 
                 file_save_params = results + str(-1) + "/pickled_files/params_mnist_mixture_patches.pkl"
 
-                with open(file_save_params, 'wb') as file:
-                    pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
+                #with open(file_save_params, 'wb') as file:
+                #    pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
 
-                file_loss = results + str(-1) + "/pickled_files/loss_mnist_patches.pkl"
-                with open(file_loss, 'wb') as file:
-                    pickle.dump([xm_loss,xm_loss_NN,z_loss,iaf_loss,mixture_loss_inits,mixture_loss,nb], file)
+                #file_loss = results + str(-1) + "/pickled_files/loss_mnist_patches.pkl"
+                #with open(file_loss, 'wb') as file:
+                #    pickle.dump([xm_loss,xm_loss_NN,z_loss,iaf_loss,mixture_loss_inits,mixture_loss,nb], file)
 
                 #compare_ELBO(num_epochs_test, xm_loss/num_images_to_run, iaf_loss/num_images_to_run, z_loss/num_images_to_run, mixture_loss_inits/num_images_to_run, mixture_loss/num_images_to_run , results, -1, image = 0) #ylim1= value - 50,ylim2 = value + 20,
 

@@ -66,8 +66,8 @@ DECODER_PATH = "models/svhn_decoder_TN_stop_early"    ##simple is for simple VAE
 ##The following encoder/decoder pair is for -1,1 data
 #ENCODER_PATH = "models/svhn_encoder_anneal_norm_0-1_stop_early"  ##without 20 is d=50
 #DECODER_PATH = "models/svhn_decoder_anneal_norm_0-1_stop_early"  ##simple is for simple VAE
-ENCODER_PATH_UPDATED  =  "models/svhn_encoder_TN_patches-updated.pt.pth"  
-ENCODER_PATH_UPDATED_TEST = "models/svhn_encoder_TN_patches-updated_test_1000.pt.pth"
+ENCODER_PATH_UPDATED  =  "models/svhn_encoder_TN_TH-updated.pt.pth"  
+ENCODER_PATH_UPDATED_TEST = "models/svhn_encoder_TN_TH-updated_test_1000.pt.pth"
 
 """
 Create dataloaders to feed data into the neural network
@@ -167,9 +167,9 @@ print((torch.nn.Softplus()(decoder.get_parameter("log_sigma"))))
 #mixture_mse = np.zeros((6,10,num_epochs_test))
 #print(decoder)
 ###Generate 500 samples from decoder
-#for i in range(100):
-#    x = generate_samples(p_z, decoder, d, L=1, data='svhn').cpu().data.numpy().reshape(1,3,32,32)  
-#    plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
+for i in range(100):
+    x = generate_samples(p_z, decoder, d, L=1, data='svhn').cpu().data.numpy().reshape(1,3,32,32)  
+    plot_image_svhn(np.squeeze(x), os.getcwd() + "/results/generated-samples/" + str(i)+ ".png" ) 
 #xm_loss = np.zeros((6,10,num_epochs_test))
 #xm_loss_per_img = np.zeros((6,10,num_epochs_test))
 #xm_mse_per_img = np.zeros((6,10,num_epochs_test))
@@ -227,7 +227,7 @@ for iterations in range(1):
         ## Right half missing (0)
         #test_loader = torch.utils.data.DataLoader(dataset=BinaryMNIST_Test(binarize = binary_data, top_half=True),batch_size=1)
         ## 4 patches of size 10*10 missing (-1)
-        test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(patches=True),batch_size=1) # patches top_half
+        test_loader = torch.utils.data.DataLoader(dataset=SVHN_Test(top_half=True),batch_size=1) # patches top_half
         
         print("test data loaded")
         test_log_likelihood, test_loss, test_mse, nb, = 0, 0, 0, 0
@@ -474,13 +474,13 @@ for iterations in range(1):
             prefix = results + str(i) + "/images/" +  str(nb%10) + "/"  + str(iterations) + '-' 
 
             print(lower_bound[-1]/nb, upper_bound[-1]/nb, bound_encoder_train[-1]/nb,bound_encoder_test[-1]/nb, pseudo_iwae[-1]/nb, m_iwae[-1]/nb, iaf_iwae[-1]/nb, z_iwae[-1]/nb, mixture_iwae[-1]/nb, mixture_iwae_inits[-1]/nb) #added mixture_iwae_inits later
-            file_save_params = results + str(-1) + "/pickled_files/params_svhn_patches_gaussian.pkl"
+            file_save_params = results + str(-1) + "/pickled_files/params_svhn_TH_gaussian.pkl"
 
             with open(file_save_params, 'wb') as file:
                 pickle.dump([pseudo_gibbs_sample,metropolis_gibbs_sample,z_params,iaf_params, mixture_params_inits,mixture_params,nb], file)
             #pickle.dump([iaf_gaussian_params, iaf_mixture_params ,iaf_mixture_params_re_inits ,nb], file)
 
-            file_loss = results + str(-1) + "/pickled_files/loss_svhn_patches_gaussian.pkl"
+            file_loss = results + str(-1) + "/pickled_files/loss_svhn_TH_gaussian.pkl"
             with open(file_loss, 'wb') as file:
                 pickle.dump([z_loss, mixture_loss_inits, mixture_loss, iaf_loss,  nb], file)
                 #pickle.dump([iaf_gaussian_loss, iaf_mixture_loss, iaf_mixture_reinits_loss, nb], file)
@@ -489,7 +489,7 @@ for iterations in range(1):
             colours = ['g', 'b', 'y', 'r', 'k', 'c']
             compare_iwae(lower_bound/nb, upper_bound/nb, bound_encoder_train/nb, bound_encoder_test/nb, pseudo_iwae/nb, m_iwae/nb, z_iwae/nb, iaf_iwae/nb, mixture_iwae/nb , mixture_iwae_inits/nb,  colours, x, "IWAE", results + str(-1) + "/compiled/IWAEvsSamples_svhn_TH.png", ylim1= -9000, ylim2 = 0)
             
-            file_save_iwae = results + str(-1) + "/pickled_files/svhn_patches_infered_iwae_p_gaussian.pkl"
+            file_save_iwae = results + str(-1) + "/pickled_files/svhn_TH_infered_iwae_p_gaussian.pkl"
             with open(file_save_iwae, 'wb') as file:
                 pickle.dump([lower_bound/nb, upper_bound/nb, bound_encoder_train/nb, bound_encoder_test/nb, pseudo_iwae/nb, m_iwae/nb, z_iwae/nb, iaf_iwae/nb, mixture_iwae/nb , mixture_iwae_inits/nb, nb], file)
                 

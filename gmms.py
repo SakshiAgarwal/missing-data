@@ -33,7 +33,7 @@ def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_s
 				embeddings[int(labels), int(nb[labels]), :] = out_encoder.cpu().data.numpy().astype(float)
 				nb[labels] += 1
 		else:
-			b_data, b_mask = data
+			b_data, b_mask, b_full = data
 			b_data = b_data.to(device,dtype = torch.float)
 			out_encoder = encoder.forward(b_data)
 			embeddings[ nb : nb + b_data.shape[0], :] = out_encoder.cpu().data.numpy().astype(float)
@@ -45,7 +45,7 @@ def train_gaussian_mixture(train_loader, encoder, d, batch_size, results, file_s
 		gm = GaussianMixture(n_components=100, covariance_type = 'diag', init_params = 'k-means++').fit(embeddings[:,:d])
 		print(gm.weights_, gm.means_.shape, gm.covariances_.shape)
 		X = TSNE(n_components=2, learning_rate='auto', init='random', perplexity=3).fit_transform(gm.means_)
-		scatter_plot_100(X.reshape([100,2]), 100, results + str(-1) + "/" + str(with_labels) + "mixture-100-components.png")
+		#scatter_plot_100(X.reshape([100,2]), 100, results + str(-1) + "/" + str(with_labels) + "mixture-100-components.png")
 		with open(file_save, 'wb') as file:
 			pickle.dump(gm, file)
 	else:
